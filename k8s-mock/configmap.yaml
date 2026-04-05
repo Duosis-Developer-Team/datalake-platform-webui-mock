@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: datalake-webui-mock-config
+data:
+  APP_BRAND_TITLE: "Datalake WebUI"
+  APP_BUILD_ID: "k8s"

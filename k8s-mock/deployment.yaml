@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: datalake-webui-mock
+  labels:
+    app: datalake-webui-mock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: datalake-webui-mock
+  template:
+    metadata:
+      labels:
+        app: datalake-webui-mock
+    spec:
+      containers:
+        - name: webui
+          image: datalake-webui-mock:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8050
+          env:
+            - name: APP_MODE
+              value: "mock"
+            - name: APP_BRAND_TITLE
+              valueFrom:
+                configMapKeyRef:
+                  name: datalake-webui-mock-config
+                  key: APP_BRAND_TITLE
+            - name: APP_BUILD_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: datalake-webui-mock-config
+                  key: APP_BUILD_ID
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8050
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8050
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3

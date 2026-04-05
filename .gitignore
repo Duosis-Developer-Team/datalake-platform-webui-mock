@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+loadtest/reports/
+
+# Local query overrides (optional; remove this line if the team commits shared overrides)
+data/query_overrides.json
+
+# Docker / local volume names (documentation only; not always present as dirs)
+pgdata/
+redis_data/
+
+# OS / logs
+Thumbs.db
+*.log
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/

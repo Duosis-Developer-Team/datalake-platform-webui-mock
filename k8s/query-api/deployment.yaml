@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bulutistan-query-api
+  labels:
+    app: bulutistan-query-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bulutistan-query-api
+  template:
+    metadata:
+      labels:
+        app: bulutistan-query-api
+    spec:
+      containers:
+        - name: bulutistan-query-api
+          image: bulutistan-query-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: bulutistan-query-api-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: bulutistan-query-api-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: bulutistan-query-api-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: bulutistan-query-api-config
+                  key: DB_USER
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: bulutistan-query-api-secret
+                  key: DB_PASS

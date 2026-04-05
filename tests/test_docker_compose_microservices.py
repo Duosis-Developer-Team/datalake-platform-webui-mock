@@ -1,0 +1,69 @@
+"""Sanity checks for docker-compose microservice layout (no PyYAML dependency)."""
+
+from pathlib import Path
+
+
+def _compose_text() -> str:
+    root = Path(__file__).resolve().parents[1]
+    return (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+
+def _mock_compose_text() -> str:
+    root = Path(__file__).resolve().parents[1]
+    return (root / "docker-compose.mock.yml").read_text(encoding="utf-8")
+
+
+def test_docker_compose_builds_three_apis_from_services_dirs() -> None:
+    text = _compose_text()
+    assert "context: ./services/datacenter-api" in text
+    assert "context: ./services/customer-api" in text
+    assert "context: ./services/query-api" in text
+
+
+def test_docker_compose_does_not_reference_missing_backend_folder() -> None:
+    text = _compose_text()
+    assert "build: ./backend" not in text
+    assert "./backend" not in text
+
+
+def test_docker_compose_defines_datalake_network_and_app_api_urls() -> None:
+    text = _compose_text()
+    assert "datalake:" in text
+    assert "DATACENTER_API_URL" in text
+    assert "http://datacenter-api:8000" in text
+    assert "microservice" in text
+
+
+def test_docker_compose_no_hardcoded_db_host_for_apis() -> None:
+    """APIs must use .env (external DB); Compose must not override DB_* with internal postgres."""
+    text = _compose_text()
+    assert "DB_HOST: db" not in text
+
+
+def test_docker_compose_apis_use_env_file() -> None:
+    text = _compose_text()
+    assert text.count("env_file:") >= 4  # app + datacenter-api + customer-api + query-api
+
+
+def test_docker_compose_defines_mock_profile_app_mock() -> None:
+    text = _compose_text()
+    assert "app-mock:" in text
+    assert "APP_MODE: mock" in text
+    assert "- mock" in text
+    assert "8051:8050" in text
+
+
+def test_docker_compose_mock_file_single_service() -> None:
+    text = _mock_compose_text()
+    assert "webui-mock:" in text
+    assert "APP_MODE: mock" in text
+    assert "8050:8050" in text
+    assert "context: ." in text
+
+
+def test_docker_compose_db_service_not_on_microservice_profile() -> None:
+    """Bundled Postgres is optional (with-db only); microservice stack uses external DB."""
+    text = _compose_text()
+    db_block = text.split("  db:")[1].split("  redis:")[0]
+    assert "- microservice" not in db_block
+    assert "- with-db" in db_block

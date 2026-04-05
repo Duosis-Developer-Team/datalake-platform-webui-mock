@@ -1,0 +1,18 @@
+# Mock-only UI: single container, no Redis/APIs/DB. http://localhost:8050
+#   docker compose -f docker-compose.mock.yml up -d --build
+# For the full microservice stack, use docker-compose.yml (profiles microservice / mock).
+
+services:
+  webui-mock:
+    build:
+      context: .
+      args:
+        APP_BUILD_ID: ${APP_BUILD_ID:-local}
+    container_name: datalake-webui-mock
+    ports:
+      - "8050:8050"
+    environment:
+      APP_BUILD_ID: ${APP_BUILD_ID:-local}
+      APP_MODE: mock
+      # Optional per-customer demo label (sidebar + browser tab)
+      APP_BRAND_TITLE: ${APP_BRAND_TITLE:-Datalake WebUI}
