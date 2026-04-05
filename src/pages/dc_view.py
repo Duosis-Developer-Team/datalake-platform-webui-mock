@@ -2059,7 +2059,13 @@ def build_dc_view(dc_id, time_range=None):
             dmc.Text("Export", size="xs", c="dimmed"),
             dmc.Button("CSV", id="dc-export-csv", size="xs", variant="light", color="gray"),
             dmc.Button("Excel", id="dc-export-xlsx", size="xs", variant="light", color="gray"),
-            dmc.Button("PDF", id="dc-export-pdf", size="xs", variant="light", color="gray"),
+            dmc.Button(
+                "PDF",
+                size="xs",
+                variant="light",
+                color="gray",
+                **{"data-pdf-target": "dc-export-pdf"},
+            ),
         ],
     )
     header_right_extra = list(sla_badges or []) + [export_group]

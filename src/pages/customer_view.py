@@ -1446,7 +1446,13 @@ def build_customer_layout(time_range=None, selected_customer=None):
             dmc.Text("Export", size="xs", c="dimmed"),
             dmc.Button("CSV", id="customer-export-csv", size="xs", variant="light", color="gray"),
             dmc.Button("Excel", id="customer-export-xlsx", size="xs", variant="light", color="gray"),
-            dmc.Button("PDF", id="customer-export-pdf", size="xs", variant="light", color="gray"),
+            dmc.Button(
+                "PDF",
+                size="xs",
+                variant="light",
+                color="gray",
+                **{"data-pdf-target": "customer-export-pdf"},
+            ),
         ],
     )
 

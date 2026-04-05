@@ -340,7 +340,13 @@ def build_datacenters(time_range=None):
                                             children=[
                                                 dmc.Button("CSV", id="datacenters-export-csv", size="xs", variant="light", color="indigo"),
                                                 dmc.Button("Excel", id="datacenters-export-xlsx", size="xs", variant="light", color="indigo"),
-                                                dmc.Button("PDF", id="datacenters-export-pdf", size="xs", variant="light", color="indigo"),
+                                                dmc.Button(
+                                                "PDF",
+                                                size="xs",
+                                                variant="light",
+                                                color="indigo",
+                                                **{"data-pdf-target": "datacenters-export-pdf"},
+                                            ),
                                             ],
                                         ),
                                     ],

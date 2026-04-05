@@ -16,3 +16,13 @@ def test_format_dc_display_name_same_as_name():
 
 def test_format_dc_display_name_casefold_duplicate():
     assert format_dc_display_name("DC13", "dc13") == "DC13"
+
+
+def test_format_dc_display_name_architectural_mock_description():
+    assert (
+        format_dc_display_name(
+            "Istanbul DC 1",
+            "Primary metro — Classic (KM), Hyperconverged, Power",
+        )
+        == "Istanbul DC 1 - Primary metro — Classic (KM), Hyperconverged, Power"
+    )

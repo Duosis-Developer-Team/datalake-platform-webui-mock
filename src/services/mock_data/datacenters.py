@@ -69,7 +69,7 @@ _MOCK_SUMMARIES: list[dict[str, Any]] = [
         "IST-DC1",
         "Istanbul DC 1",
         "Istanbul, TR",
-        "Primary metro — VMware, Nutanix, IBM Power",
+        "Primary metro — Classic (KM), Hyperconverged, Power",
         platforms=3,
         clusters=6,
         hosts=46,
@@ -85,7 +85,7 @@ _MOCK_SUMMARIES: list[dict[str, Any]] = [
         "ANK-DC1",
         "Ankara DC 1",
         "Ankara, TR",
-        "Central region — VMware + IBM Power",
+        "Central region — Classic (KM) + Power",
         platforms=2,
         clusters=4,
         hosts=28,
@@ -101,7 +101,7 @@ _MOCK_SUMMARIES: list[dict[str, Any]] = [
         "IZM-DC1",
         "Izmir DC 1",
         "Izmir, TR",
-        "Coastal edge — Nutanix hyperconverged",
+        "Coastal edge — Hyperconverged footprint",
         platforms=1,
         clusters=3,
         hosts=18,
@@ -117,7 +117,7 @@ _MOCK_SUMMARIES: list[dict[str, Any]] = [
         "FRA-DC1",
         "Frankfurt DC 1",
         "Frankfurt, DE",
-        "EU region — VMware + Nutanix (DR target for IST)",
+        "EU region — Classic (KM) + Hyperconverged (DR target for IST)",
         platforms=2,
         clusters=5,
         hosts=32,
@@ -193,7 +193,7 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
         "meta": {
             "name": "Istanbul DC 1",
             "location": "Istanbul, TR",
-            "description": "Primary metro — VMware, Nutanix, IBM Power",
+            "description": "Primary metro — Classic (KM), Hyperconverged, Power",
         },
         "intel": {
             "clusters": 6,
@@ -255,7 +255,7 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
         "meta": {
             "name": "Ankara DC 1",
             "location": "Ankara, TR",
-            "description": "Central region — VMware + IBM Power",
+            "description": "Central region — Classic (KM) + Power",
         },
         "intel": {
             "clusters": 4,
@@ -306,7 +306,7 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
         "meta": {
             "name": "Izmir DC 1",
             "location": "Izmir, TR",
-            "description": "Nutanix hyperconverged — capacity pressure scenario",
+            "description": "Hyperconverged — capacity pressure scenario",
         },
         "intel": {
             "clusters": 3,
@@ -347,7 +347,7 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
         "meta": {
             "name": "Frankfurt DC 1",
             "location": "Frankfurt, DE",
-            "description": "EU VMware + Nutanix — healthy headroom",
+            "description": "EU Classic (KM) + Hyperconverged — healthy headroom",
         },
         "intel": {
             "clusters": 5,

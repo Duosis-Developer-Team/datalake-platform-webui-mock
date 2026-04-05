@@ -452,11 +452,11 @@ def build_region_detail_panel(region, tr):
         ibm = platforms.get("ibm", {})
         arch_items = []
         if vmware.get("clusters", 0) > 0 or vmware.get("hosts", 0) > 0:
-            arch_items.append(f"VMware ({vmware.get('clusters', 0)}C, {vmware.get('hosts', 0)}H)")
+            arch_items.append(f"Classic ({vmware.get('clusters', 0)}C, {vmware.get('hosts', 0)}H)")
         if nutanix.get("hosts", 0) > 0:
-            arch_items.append(f"Nutanix ({nutanix.get('hosts', 0)}H)")
+            arch_items.append(f"Hyperconverged ({nutanix.get('hosts', 0)}H)")
         if ibm.get("hosts", 0) > 0:
-            arch_items.append(f"IBM ({ibm.get('hosts', 0)}H, {ibm.get('lpars', 0)}L)")
+            arch_items.append(f"Power ({ibm.get('hosts', 0)}H, {ibm.get('lpars', 0)}L)")
         arch_text = " \u00b7 ".join(arch_items) if arch_items else "\u2014"
 
         dc_cards.append(
@@ -684,10 +684,10 @@ def build_global_view(time_range=None):
                                         ),
                                         dmc.Button(
                                             "PDF",
-                                            id="global-export-pdf",
                                             size="xs",
                                             variant="light",
                                             color="gray",
+                                            **{"data-pdf-target": "global-export-pdf"},
                                         ),
                                     ],
                                 ),
@@ -867,11 +867,11 @@ def build_dc_info_card(dc_id, tr, site_name=""):
     ibm = platforms.get("ibm", {})
     arch_items = []
     if vmware.get("clusters", 0) > 0 or vmware.get("hosts", 0) > 0:
-        arch_items.append(f"VMware ({vmware.get('clusters', 0)}C, {vmware.get('hosts', 0)}H)")
+        arch_items.append(f"Classic ({vmware.get('clusters', 0)}C, {vmware.get('hosts', 0)}H)")
     if nutanix.get("hosts", 0) > 0:
-        arch_items.append(f"Nutanix ({nutanix.get('hosts', 0)}H)")
+        arch_items.append(f"Hyperconverged ({nutanix.get('hosts', 0)}H)")
     if ibm.get("hosts", 0) > 0:
-        arch_items.append(f"IBM ({ibm.get('hosts', 0)}H, {ibm.get('lpars', 0)}L)")
+        arch_items.append(f"Power ({ibm.get('hosts', 0)}H, {ibm.get('lpars', 0)}L)")
     arch_text = " \u00b7 ".join(arch_items) if arch_items else "\u2014"
 
     return dmc.Paper(

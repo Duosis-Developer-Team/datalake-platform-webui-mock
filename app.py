@@ -219,6 +219,28 @@ _mantine_children = [
     ),
     dcc.Store(id="app-time-range", data=_default_tr),
     html.Div(id="export-pdf-clientside-dummy", style={"display": "none"}),
+    # Always-mounted triggers for clientside PDF callback (page-visible buttons use data-pdf-target + assets/pdf_export_trigger.js).
+    html.Div(
+        [
+            html.Button(
+                id=hid,
+                n_clicks=0,
+                type="button",
+                title="pdf-trigger",
+                style={"display": "none"},
+            )
+            for hid in (
+                "home-export-pdf",
+                "datacenters-export-pdf",
+                "dc-export-pdf",
+                "global-export-pdf",
+                "customer-export-pdf",
+                "qe-export-pdf",
+            )
+        ],
+        id="pdf-export-hidden-triggers",
+        style={"display": "none"},
+    ),
     html.Div(
         [
             _sidebar,
