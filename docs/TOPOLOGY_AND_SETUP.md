@@ -224,6 +224,8 @@ The **`app`** service sets **`DATACENTER_API_URL`**, **`CUSTOMER_API_URL`**, and
 
 ## 6. Kubernetes (ingress routing)
 
+For a **step-by-step** install (images, Secrets, ConfigMaps, apply order, verification), see **[KUBERNETES_SETUP.md](KUBERNETES_SETUP.md)**.
+
 [`k8s/ingress.yaml`](../k8s/ingress.yaml) (example host `bulutistan.local`) routes:
 
 | Path prefix | Backend Service (example name) |
@@ -258,6 +260,7 @@ The Ingress example uses host **`datalake-demo.local`**; point it at your ingres
 
 | Document | Content |
 |----------|---------|
+| [KUBERNETES_SETUP.md](KUBERNETES_SETUP.md) | Kubernetes: mock stack, full stack, monitoring, troubleshooting |
 | [APP_RESTART.md](APP_RESTART.md) | Stopping Dash, port 8050, `stop_app.ps1` |
 | [PROJECT_STANDARDS.md](PROJECT_STANDARDS.md) | Project standards |
 | [CACHE_STRATEGY_COMPARISON.md](CACHE_STRATEGY_COMPARISON.md) | Legacy vs Redis cache, warm/refresh pillars |

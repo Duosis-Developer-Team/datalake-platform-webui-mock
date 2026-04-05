@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import random
+import time
 from datetime import datetime
 
 import dash
@@ -151,6 +153,7 @@ def build_mock_chatbot() -> html.Div:
             "zIndex": 20000,
         },
         children=[
+            html.Div(id="mock-chatbot-scroll-dummy", style={"display": "none"}),
             dcc.Store(id="mock-chatbot-open", data=False),
             dcc.Store(id="mock-chatbot-history", data=[]),
             dcc.Store(id="mock-chatbot-expanded", data=False),
@@ -395,8 +398,13 @@ def register_mock_chatbot_callbacks(app: dash.Dash) -> None:
                 key = json.loads(raw).get("idx", "health_overview")
             except Exception:
                 key = "health_overview"
-            user = f"Quick: {key}"
+            actions = quick_actions_for_path(pathname)
+            user = next(
+                (a.get("user_text") or a.get("label", "") for a in actions if a.get("id") == key),
+                "",
+            ) or f"Tell me more about scenario {key}."
             clear_input = no_update
+        time.sleep(random.uniform(0.6, 1.2))
         ans = get_canned_answer(key, pathname)
         hist.append({"role": "user", "text": user})
         hist.append({"role": "assistant", "text": ans})

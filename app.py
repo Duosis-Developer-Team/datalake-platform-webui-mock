@@ -285,6 +285,23 @@ if is_mock_mode():
     register_mock_chatbot_callbacks(app)
     register_daa_callbacks(app)
 
+    app.clientside_callback(
+        """
+        function(children) {
+            const el = document.getElementById("mock-chatbot-messages");
+            if (!el) {
+                return window.dash_clientside.no_update;
+            }
+            requestAnimationFrame(function() {
+                el.scrollTop = el.scrollHeight;
+            });
+            return "";
+        }
+        """,
+        dash.Output("mock-chatbot-scroll-dummy", "children"),
+        dash.Input("mock-chatbot-messages", "children"),
+    )
+
 
 app.clientside_callback(
     """

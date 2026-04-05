@@ -3,4 +3,6 @@ kind: ConfigMap
 metadata:
   name: bulutistan-frontend-config
 data:
-  API_BASE_URL: "http://bulutistan-data-api"
+  DATACENTER_API_URL: "http://bulutistan-datacenter-api"
+  CUSTOMER_API_URL: "http://bulutistan-customer-api"
+  QUERY_API_URL: "http://bulutistan-query-api"

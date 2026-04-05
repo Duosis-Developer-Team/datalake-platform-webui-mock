@@ -26,6 +26,7 @@ def _summary_row(
     location: str,
     description: str,
     *,
+    site_name: str,
     platforms: int,
     clusters: int,
     hosts: int,
@@ -42,7 +43,7 @@ def _summary_row(
         "name": name,
         "location": location,
         "description": description,
-        "site_name": dc_id.split("-")[0],
+        "site_name": site_name,
         "status": "Operational",
         "platform_count": platforms,
         "cluster_count": clusters,
@@ -67,9 +68,10 @@ def _summary_row(
 _MOCK_SUMMARIES: list[dict[str, Any]] = [
     _summary_row(
         "IST-DC1",
-        "Istanbul DC 1",
+        "IST-DC1",
         "Istanbul, TR",
-        "Primary metro — Classic (KM), Hyperconverged, Power",
+        "Primary — Classic, HCI, Power",
+        site_name="ISTANBUL",
         platforms=3,
         clusters=6,
         hosts=46,
@@ -83,9 +85,10 @@ _MOCK_SUMMARIES: list[dict[str, Any]] = [
     ),
     _summary_row(
         "ANK-DC1",
-        "Ankara DC 1",
+        "ANK-DC1",
         "Ankara, TR",
-        "Central region — Classic (KM) + Power",
+        "Central — Classic + Power",
+        site_name="ANKARA",
         platforms=2,
         clusters=4,
         hosts=28,
@@ -99,9 +102,10 @@ _MOCK_SUMMARIES: list[dict[str, Any]] = [
     ),
     _summary_row(
         "IZM-DC1",
-        "Izmir DC 1",
+        "IZM-DC1",
         "Izmir, TR",
-        "Coastal edge — Hyperconverged footprint",
+        "Edge — Nutanix HCI focus",
+        site_name="IZMIR",
         platforms=1,
         clusters=3,
         hosts=18,
@@ -115,9 +119,10 @@ _MOCK_SUMMARIES: list[dict[str, Any]] = [
     ),
     _summary_row(
         "FRA-DC1",
-        "Frankfurt DC 1",
+        "FRA-DC1",
         "Frankfurt, DE",
-        "EU region — Classic (KM) + Hyperconverged (DR target for IST)",
+        "EU — Classic + HCI (DR for IST)",
+        site_name="ALMANYA",
         platforms=2,
         clusters=5,
         hosts=32,
@@ -191,9 +196,9 @@ def _power_block(
 _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
     "IST-DC1": {
         "meta": {
-            "name": "Istanbul DC 1",
+            "name": "IST-DC1",
             "location": "Istanbul, TR",
-            "description": "Primary metro — Classic (KM), Hyperconverged, Power",
+            "description": "Primary — Classic, HCI, Power",
         },
         "intel": {
             "clusters": 6,
@@ -253,9 +258,9 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
     },
     "ANK-DC1": {
         "meta": {
-            "name": "Ankara DC 1",
+            "name": "ANK-DC1",
             "location": "Ankara, TR",
-            "description": "Central region — Classic (KM) + Power",
+            "description": "Central — Classic + Power",
         },
         "intel": {
             "clusters": 4,
@@ -304,9 +309,9 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
     },
     "IZM-DC1": {
         "meta": {
-            "name": "Izmir DC 1",
+            "name": "IZM-DC1",
             "location": "Izmir, TR",
-            "description": "Hyperconverged — capacity pressure scenario",
+            "description": "HCI — capacity pressure scenario",
         },
         "intel": {
             "clusters": 3,
@@ -345,9 +350,9 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
     },
     "FRA-DC1": {
         "meta": {
-            "name": "Frankfurt DC 1",
+            "name": "FRA-DC1",
             "location": "Frankfurt, DE",
-            "description": "EU Classic (KM) + Hyperconverged — healthy headroom",
+            "description": "EU — Classic + HCI, healthy headroom",
         },
         "intel": {
             "clusters": 5,

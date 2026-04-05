@@ -41,12 +41,6 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3
-          env:
-            - name: API_BASE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: bulutistan-frontend-config
-                  key: API_BASE_URL
           envFrom:
             - configMapRef:
                 name: bulutistan-frontend-config

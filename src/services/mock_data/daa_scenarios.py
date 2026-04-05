@@ -37,15 +37,24 @@ def match_scenario(user_text: str, pathname: str) -> str | None:
     kind = _path_kind(pathname)
     if any(k in t for k in ("health", "sağlık", "durum")):
         return "health_overview"
-    if "dikkat" in t or "uyarı" in t or "alert" in t:
+    if "summarize" in t or "summary" in t or "özet" in t:
+        return "health_overview"
+    if "dikkat" in t or "uyarı" in t or "alert" in t or "watch" in t:
         return "weekly_alerts"
     if "kapasite" in t or "capacity" in t:
         return "capacity_pressure" if kind == "dc_detail" else "capacity_multi"
-    if "optimizasyon" in t or "tasarruf" in t or "cost" in t or "maliyet" in t:
+    if (
+        "optimizasyon" in t
+        or "tasarruf" in t
+        or "cost" in t
+        or "maliyet" in t
+        or "waste" in t
+        or "idle" in t
+    ):
         return "cost_save"
     if "rapor" in t or "report" in t:
         return "exec_report"
-    if "90 gün" in t or "90 day" in t or "projeksiyon" in t:
+    if "90 gün" in t or "90 day" in t or "90-day" in t or "projeksiyon" in t:
         return "forecast_90"
     return None
 
@@ -91,31 +100,77 @@ def get_canned_answer(key: str, pathname: str) -> str:
 
 
 def quick_actions_for_path(pathname: str) -> list[dict[str, str]]:
-    """Buttons: label + id used as scenario key or free-text seed."""
+    """Buttons: label (UI), id (scenario key), user_text (message shown in chat)."""
     kind = _path_kind(pathname)
     dc = _dc_from_path(pathname)
     base = [
-        {"id": "health_overview", "label": "Overall environment health?"},
-        {"id": "weekly_alerts", "label": "Anything to watch this week?"},
+        {
+            "id": "health_overview",
+            "label": "Overall environment health?",
+            "user_text": "How is overall environment health across our datacenters?",
+        },
+        {
+            "id": "weekly_alerts",
+            "label": "Anything to watch this week?",
+            "user_text": "Is there anything I should watch closely this week?",
+        },
     ]
     if kind == "dc_detail":
         return base + [
-            {"id": "capacity_pressure", "label": f"Capacity risk for {dc or 'this DC'}?"},
-            {"id": "cost_save", "label": "Cost optimization ideas?"},
+            {
+                "id": "capacity_pressure",
+                "label": f"Capacity risk for {dc or 'this DC'}?",
+                "user_text": f"What is the capacity outlook for {dc or 'this datacenter'}?",
+            },
+            {
+                "id": "cost_save",
+                "label": "Cost optimization ideas?",
+                "user_text": "What cost optimization ideas do you suggest for this site?",
+            },
         ]
     if kind == "analytics":
         return base + [
-            {"id": "capacity_multi", "label": "Which DC needs growth first?"},
-            {"id": "cost_save", "label": "Estimated savings potential?"},
+            {
+                "id": "capacity_multi",
+                "label": "Which DC needs growth first?",
+                "user_text": "Which datacenter needs capacity growth first?",
+            },
+            {
+                "id": "cost_save",
+                "label": "Estimated savings potential?",
+                "user_text": "What estimated savings potential do you see in the estate?",
+            },
         ]
     if kind == "daa":
         return [
-            {"id": "exec_report", "label": "How do I export an executive report?"},
-            {"id": "forecast_90", "label": "Explain 90-day capacity outlook"},
-            {"id": "health_overview", "label": "Summarize all datacenters"},
-            {"id": "cost_save", "label": "Where is waste in the estate?"},
+            {
+                "id": "exec_report",
+                "label": "How do I export an executive report?",
+                "user_text": "How do I export an executive report from this platform?",
+            },
+            {
+                "id": "forecast_90",
+                "label": "Explain 90-day capacity outlook",
+                "user_text": "Can you explain the 90-day capacity outlook for our infrastructure?",
+            },
+            {
+                "id": "health_overview",
+                "label": "Summarize all datacenters",
+                "user_text": "Please summarize health and load across all datacenters.",
+            },
+            {
+                "id": "cost_save",
+                "label": "Where is waste in the estate?",
+                "user_text": "Where is waste or idle capacity in our estate?",
+            },
         ]
-    return base + [{"id": "capacity_multi", "label": "Compare capacity across DCs"}]
+    return base + [
+        {
+            "id": "capacity_multi",
+            "label": "Compare capacity across DCs",
+            "user_text": "How does capacity compare across our datacenters?",
+        }
+    ]
 
 
 def daa_report_rows(report_type: str, dc_code: str | None) -> tuple[list[str], list[list[Any]]]:

@@ -7,9 +7,11 @@ from importlib import reload
 
 import pytest
 
+from src.pages.global_view import CITY_COORDINATES, _build_map_dataframe
 from src.services import mock_client
 from src.services.mock_data import daa_scenarios
-from src.services.mock_data.datacenters import MOCK_DC_CODES, get_dc_detail
+from src.services.mock_data.customers import MOCK_CUSTOMER_NAMES, get_customer_resources
+from src.services.mock_data.datacenters import MOCK_DC_CODES, get_all_datacenters_summary, get_dc_detail
 
 
 def test_mock_dc_codes_count() -> None:
@@ -40,6 +42,9 @@ def test_mock_global_dashboard() -> None:
 def test_daa_quick_actions() -> None:
     qa = daa_scenarios.quick_actions_for_path("/daa")
     assert len(qa) >= 3
+    for a in qa:
+        assert a.get("user_text")
+        assert not str(a["user_text"]).lower().startswith("quick:")
 
 
 def test_daa_report_rows() -> None:
@@ -65,6 +70,34 @@ def test_api_client_delegates_when_mock(mock_env) -> None:
     assert "Akbank" in lst
     s = ac.get_all_datacenters_summary(None)
     assert len(s) == 4
+
+
+def test_mock_summaries_site_names_on_global_map_keys() -> None:
+    for s in get_all_datacenters_summary():
+        sn = (s.get("site_name") or "").upper().strip()
+        assert sn in CITY_COORDINATES, f"site_name {sn!r} must exist in CITY_COORDINATES"
+
+
+def test_mock_global_map_dataframe_has_rows() -> None:
+    df = _build_map_dataframe(get_all_datacenters_summary())
+    assert not df.empty
+    assert len(df) == len(MOCK_DC_CODES)
+
+
+def test_mock_customer_resources_match_view_schema() -> None:
+    for name in MOCK_CUSTOMER_NAMES:
+        r = get_customer_resources(name)
+        totals = r["totals"]
+        assets = r["assets"]
+        assert int(totals.get("vms_total", 0) or 0) > 0
+        assert "classic" in assets and "hyperconv" in assets
+        assert int(assets["classic"].get("vm_count", 0) or 0) >= 0
+        assert int(assets["hyperconv"].get("vm_count", 0) or 0) >= 0
+        assert (int(assets["classic"].get("vm_count", 0) or 0) > 0) or (
+            int(assets["hyperconv"].get("vm_count", 0) or 0) > 0
+        )
+        backup = totals.get("backup") or {}
+        assert "veeam_defined_sessions" in backup
 
 
 def test_api_client_live_without_mock(monkeypatch: pytest.MonkeyPatch) -> None:
