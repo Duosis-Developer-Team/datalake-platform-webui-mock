@@ -19,6 +19,7 @@ from src.utils.export_helpers import (
     dash_send_excel_workbook,
     dataframes_to_excel_with_meta,
 )
+from src.utils.ui_tokens import PRIMARY, PRIMARY_END, gradient_button_style
 
 _EM_DASH = "\u2014"
 
@@ -97,27 +98,77 @@ def _render_run_output(result: dict):
 
 
 def layout():
+    hero = dmc.Paper(
+        px="xl",
+        py="lg",
+        radius="lg",
+        mb="lg",
+        style={
+            "marginLeft": "32px",
+            "marginRight": "32px",
+            "background": f"linear-gradient(135deg, #f6f2ff 0%, #ede8ff 55%, #ffffff 100%)",
+            "border": "1px solid rgba(85, 44, 248, 0.12)",
+        },
+        children=[
+            dmc.Group(
+                align="flex-start",
+                children=[
+                    dmc.ThemeIcon(
+                        DashIconify(icon="solar:code-square-bold-duotone", width=26, color="#fff"),
+                        size="xl",
+                        radius="md",
+                        variant="filled",
+                        color="indigo",
+                        style={
+                            "background": f"linear-gradient(135deg, {PRIMARY} 0%, {PRIMARY_END} 100%)",
+                            "border": "none",
+                        },
+                    ),
+                    dmc.Stack(
+                        gap=6,
+                        children=[
+                            html.H1(
+                                "Query Explorer",
+                                style={"margin": 0, "color": "#2B3674", "fontSize": "1.75rem", "fontWeight": 900},
+                            ),
+                            dmc.Text(
+                                "Run queries, inspect usage, and manage SQL overrides without redeploying.",
+                                size="sm",
+                                c="#6c757d",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    catalog_paper = dmc.Paper(
+        p="lg",
+        radius="lg",
+        withBorder=True,
+        shadow="sm",
+        style={
+            "width": "320px",
+            "flexShrink": 0,
+            "border": "1px solid rgba(85, 44, 248, 0.12)",
+            "background": "#ffffff",
+        },
+        children=[
+            dmc.Text("Query catalog", size="sm", fw=800, c="#2B3674", mb="xs", tt="uppercase", style={"letterSpacing": "0.04em"}),
+            dmc.TextInput(
+                id="query-catalog-search",
+                placeholder="Search keys…",
+                size="sm",
+                mb="sm",
+                radius="md",
+            ),
+            html.Div(id="query-catalog-list", children=dmc.Text("Loading…", size="sm", c="dimmed")),
+        ],
+    )
+
     return html.Div([
-        html.Div(
-            className="nexus-glass",
-            children=[
-                html.Div([
-                    DashIconify(icon="solar:code-square-bold-duotone", width=30, color="#4318FF"),
-                    html.H1("Query Explorer", style={"margin": "0 0 0 10px", "color": "#2B3674", "fontSize": "1.8rem"}),
-                ], style={"display": "flex", "alignItems": "center"}),
-                html.P(
-                    "Run queries, view outputs, usage map, and edit or add SQL without changing code.",
-                    style={"margin": "5px 0 0 40px", "color": "#A3AED0"},
-                ),
-            ],
-            style={
-                "padding": "24px 32px",
-                "marginBottom": "32px",
-                "display": "flex",
-                "flexDirection": "column",
-                "justifyContent": "center",
-            },
-        ),
+        hero,
 
         dcc.Store(id="qe-result-store", data=None),
         dcc.Download(id="qe-export-download"),
@@ -131,34 +182,18 @@ def layout():
                 "flexWrap": "wrap",
             },
             children=[
-                # Left: catalog
-                dmc.Paper(
-                    p="md",
-                    radius="md",
-                    withBorder=True,
-                    shadow="sm",
-                    style={"width": "300px", "flexShrink": 0},
-                    children=[
-                        dmc.Text("Query catalog", size="sm", fw=700, c="#2B3674", mb="xs"),
-                        dmc.TextInput(
-                            id="query-catalog-search",
-                            placeholder="Search keys…",
-                            size="sm",
-                            mb="sm",
-                        ),
-                        html.Div(id="query-catalog-list", children=dmc.Text("Loading…", size="sm", c="dimmed")),
-                    ],
-                ),
+                catalog_paper,
                 # Right: detail + tabs
                 html.Div(style={"flex": "1", "minWidth": "280px"}, children=[
                     dmc.Paper(
-                        p="md",
-                        radius="md",
+                        p="lg",
+                        radius="lg",
                         withBorder=True,
                         shadow="sm",
                         mb="lg",
+                        style={"border": "1px solid rgba(85, 44, 248, 0.1)"},
                         children=[
-                            dmc.Text("Selected query", size="sm", fw=600, c="#2B3674", mb="xs"),
+                            dmc.Text("Selected query", size="sm", fw=700, c="#2B3674", mb="xs"),
                             dmc.Select(
                                 id="query-select",
                                 data=_query_options(),
@@ -200,6 +235,10 @@ def layout():
                                                 "Run",
                                                 id="run-button",
                                                 leftSection=DashIconify(icon="solar:play-circle-bold"),
+                                                style={
+                                                    **gradient_button_style(),
+                                                    "boxShadow": "0 8px 20px rgba(85, 44, 248, 0.25)",
+                                                },
                                             ),
                                         ]
                                     ),
@@ -302,6 +341,9 @@ def layout():
                         ],
                         value="run",
                         id="query-explorer-tabs",
+                        color="indigo",
+                        variant="outline",
+                        radius="md",
                     ),
                 ]),
             ],

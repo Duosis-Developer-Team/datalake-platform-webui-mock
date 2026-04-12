@@ -1,0 +1,1 @@
+"""Mock Integrations settings pages."""

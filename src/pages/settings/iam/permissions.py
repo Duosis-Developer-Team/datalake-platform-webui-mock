@@ -1,0 +1,27 @@
+"""Mock permissions page (stub)."""
+
+from __future__ import annotations
+
+import dash_mantine_components as dmc
+from dash import html
+
+from src.utils.ui_tokens import section_header, settings_page_shell
+
+
+def build_layout(search: str | None = None) -> html.Div:
+    return html.Div(
+        settings_page_shell(
+            [
+                section_header(
+                    "Permissions",
+                    "Permission catalog is available in the full platform.",
+                    icon="solar:shield-check-bold-duotone",
+                ),
+                dmc.Alert(
+                    "This section uses live data in the full GUI. Mock UI shows layout only.",
+                    color="blue",
+                    variant="light",
+                ),
+            ]
+        )
+    )

@@ -77,6 +77,7 @@ _log = logging.getLogger(__name__)
 _log.info("APP_BUILD_ID=%s", APP_BUILD_ID)
 
 from src.pages import home, datacenters, dc_view, customer_view, query_explorer, global_view, region_drilldown
+from src.pages.settings import shell as settings_shell
 from src.utils.app_mode import is_mock_mode
 from src.pages.dc_view import _bps_to_gbps, _build_compute_tab
 
@@ -474,6 +475,8 @@ def render_main_content(pathname, time_range, selected_customer, search):
         params = parse_qs((search or "").lstrip("?"))
         region = params.get("region", [""])[0]
         return region_drilldown.build_region_drilldown(region, tr)
+    if pathname.startswith("/settings"):
+        return settings_shell.build_settings_page(pathname, search)
     return home.build_overview(tr)
 
 

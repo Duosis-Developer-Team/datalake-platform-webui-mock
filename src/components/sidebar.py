@@ -127,9 +127,12 @@ def create_sidebar_nav(active_path):
         dmc.NavLink(
             label="Settings",
             leftSection=DashIconify(icon="solar:settings-bold-duotone", width=20),
-            href="#",
+            href="/settings",
             className="sidebar-link",
-            disabled=True,
+            active=(active_path.startswith("/settings")),
+            variant="subtle",
+            color="indigo",
+            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
         ),
     ]
 

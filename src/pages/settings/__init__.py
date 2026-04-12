@@ -1,0 +1,1 @@
+"""Mock Settings package."""

@@ -1,0 +1,1 @@
+"""Mock IAM settings pages."""
