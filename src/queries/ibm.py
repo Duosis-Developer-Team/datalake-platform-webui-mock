@@ -1,3 +1,4 @@
+from __future__ import annotations
 # IBM Power (HMC) SQL query definitions
 # Sources: ibm_server_general (time), ibm_vios_general, ibm_lpar_general
 # Individual: (wildcard, start_ts, end_ts). Batch: (dc_list, start_ts, end_ts) with regex DC extraction.

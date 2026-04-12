@@ -1,3 +1,4 @@
+from __future__ import annotations
 import dash
 from dash import html, dcc
 import dash_mantine_components as dmc

@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Loki (NetBox) SQL query definitions — source: loki_locations
 # Used to dynamically resolve the list of active data centers.
 

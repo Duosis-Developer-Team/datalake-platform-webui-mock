@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Query Registry — central catalog of all available SQL queries.
 # To add a new query for a future dashboard, register it here.
 # The db_service uses this registry for dynamic query execution.

@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Nutanix SQL query definitions — source: nutanix_cluster_metrics
 # Match DC by cluster_name containing DC code (e.g. cluster_name LIKE '%AZ11%').
 # Params: (dc_code, start_ts, end_ts) for individual; (dc_list, pattern_list, start_ts, end_ts) for batch.

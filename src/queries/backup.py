@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 SQL queries for backup-related metrics at the datacenter level.
 

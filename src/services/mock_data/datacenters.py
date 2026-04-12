@@ -403,6 +403,69 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
 }
 
 
+_MOCK_RACKS: dict[str, list[dict[str, Any]]] = {
+    "IST-DC1": [
+        {"id": "r-ist-a1", "name": "A1", "hall_name": "Hall A", "u_height": 47, "kabin_enerji": "3x16A", "status": "active", "facility_id": "A1", "rack_type": "Standard", "serial": "SN-IST-A1"},
+        {"id": "r-ist-a2", "name": "A2", "hall_name": "Hall A", "u_height": 47, "kabin_enerji": "3x16A", "status": "active", "facility_id": "A2", "rack_type": "Standard", "serial": "SN-IST-A2"},
+        {"id": "r-ist-a3", "name": "A3", "hall_name": "Hall A", "u_height": 47, "kabin_enerji": "3x16A", "status": "inactive", "facility_id": "A3", "rack_type": "Standard", "serial": "SN-IST-A3"},
+        {"id": "r-ist-b1", "name": "B1", "hall_name": "Hall B", "u_height": 42, "kabin_enerji": "2x16A", "status": "active", "facility_id": "B1", "rack_type": "HCI", "serial": "SN-IST-B1"},
+        {"id": "r-ist-b2", "name": "B2", "hall_name": "Hall B", "u_height": 42, "kabin_enerji": "2x16A", "status": "active", "facility_id": "B2", "rack_type": "HCI", "serial": "SN-IST-B2"},
+        {"id": "r-ist-c1", "name": "C1", "hall_name": "Hall C", "u_height": 47, "kabin_enerji": "3x32A", "status": "active", "facility_id": "C1", "rack_type": "Power", "serial": "SN-IST-C1"},
+    ],
+    "ANK-DC1": [
+        {"id": "r-ank-a1", "name": "A1", "hall_name": "Hall A", "u_height": 42, "kabin_enerji": "2x16A", "status": "active", "facility_id": "A1", "rack_type": "Standard", "serial": "SN-ANK-A1"},
+        {"id": "r-ank-a2", "name": "A2", "hall_name": "Hall A", "u_height": 42, "kabin_enerji": "2x16A", "status": "active", "facility_id": "A2", "rack_type": "Standard", "serial": "SN-ANK-A2"},
+        {"id": "r-ank-b1", "name": "B1", "hall_name": "Hall B", "u_height": 47, "kabin_enerji": "3x32A", "status": "active", "facility_id": "B1", "rack_type": "Power", "serial": "SN-ANK-B1"},
+        {"id": "r-ank-b2", "name": "B2", "hall_name": "Hall B", "u_height": 47, "kabin_enerji": "3x32A", "status": "planned", "facility_id": "B2", "rack_type": "Power", "serial": "SN-ANK-B2"},
+    ],
+    "IZM-DC1": [
+        {"id": "r-izm-a1", "name": "A1", "hall_name": "Hall A", "u_height": 42, "kabin_enerji": "2x16A", "status": "active", "facility_id": "A1", "rack_type": "HCI", "serial": "SN-IZM-A1"},
+        {"id": "r-izm-a2", "name": "A2", "hall_name": "Hall A", "u_height": 42, "kabin_enerji": "2x16A", "status": "active", "facility_id": "A2", "rack_type": "HCI", "serial": "SN-IZM-A2"},
+        {"id": "r-izm-a3", "name": "A3", "hall_name": "Hall A", "u_height": 42, "kabin_enerji": "2x16A", "status": "inactive", "facility_id": "A3", "rack_type": "HCI", "serial": "SN-IZM-A3"},
+    ],
+    "FRA-DC1": [
+        {"id": "r-fra-a1", "name": "A1", "hall_name": "Hall A", "u_height": 47, "kabin_enerji": "3x16A", "status": "active", "facility_id": "A1", "rack_type": "Standard", "serial": "SN-FRA-A1"},
+        {"id": "r-fra-a2", "name": "A2", "hall_name": "Hall A", "u_height": 47, "kabin_enerji": "3x16A", "status": "active", "facility_id": "A2", "rack_type": "Standard", "serial": "SN-FRA-A2"},
+        {"id": "r-fra-b1", "name": "B1", "hall_name": "Hall B", "u_height": 42, "kabin_enerji": "2x16A", "status": "active", "facility_id": "B1", "rack_type": "HCI", "serial": "SN-FRA-B1"},
+        {"id": "r-fra-b2", "name": "B2", "hall_name": "Hall B", "u_height": 42, "kabin_enerji": "2x16A", "status": "planned", "facility_id": "B2", "rack_type": "HCI", "serial": "SN-FRA-B2"},
+    ],
+}
+
+_MOCK_RACK_DEVICES: dict[str, list[dict[str, Any]]] = {
+    "A1": [
+        {"name": "srv-compute-01", "device_type": "Server", "role": "Compute", "position": 1},
+        {"name": "srv-compute-02", "device_type": "Server", "role": "Compute", "position": 2},
+        {"name": "sw-top-01", "device_type": "Switch", "role": "Network", "position": 44},
+        {"name": "patch-panel-01", "device_type": "Patch Panel", "role": "Cabling", "position": 47},
+    ],
+    "A2": [
+        {"name": "srv-compute-03", "device_type": "Server", "role": "Compute", "position": 1},
+        {"name": "srv-compute-04", "device_type": "Server", "role": "Compute", "position": 2},
+        {"name": "srv-storage-01", "device_type": "Server", "role": "Storage", "position": 10},
+        {"name": "sw-top-02", "device_type": "Switch", "role": "Network", "position": 44},
+    ],
+    "B1": [
+        {"name": "ibm-power-01", "device_type": "IBM Power", "role": "Compute", "position": 1},
+        {"name": "ibm-power-02", "device_type": "IBM Power", "role": "Compute", "position": 8},
+        {"name": "sw-san-01", "device_type": "SAN Switch", "role": "Storage Network", "position": 42},
+    ],
+}
+
+
+def get_dc_racks(dc_code: str) -> dict[str, Any]:
+    key = _norm_dc(dc_code)
+    racks = _MOCK_RACKS.get(key, [])
+    return {"racks": deepcopy(racks), "summary": {"total": len(racks)}}
+
+
+def get_rack_devices(dc_code: str, rack_name: str) -> dict[str, Any]:
+    devices = _MOCK_RACK_DEVICES.get(rack_name, [
+        {"name": f"device-{rack_name}-01", "device_type": "Server", "role": "Compute", "position": 1},
+        {"name": f"device-{rack_name}-02", "device_type": "Server", "role": "Compute", "position": 2},
+    ])
+    return {"devices": deepcopy(devices)}
+
+
 def get_all_datacenters_summary(_tr: dict | None = None) -> list[dict[str, Any]]:
     return deepcopy(_MOCK_SUMMARIES)
 
