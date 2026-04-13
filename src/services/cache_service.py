@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Module-level cache service with stale-while-revalidate semantics.
 # Cache entries never disappear until explicitly overwritten by fresh data.
 # TTL is only used as a staleness hint (not for eviction).

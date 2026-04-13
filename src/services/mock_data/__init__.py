@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Static mock datasets for APP_MODE=mock (demo / sales UI)."""
 
 from src.services.mock_data.datacenters import (

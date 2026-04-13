@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Energy SQL query definitions
 # Sources: vmhost_metrics (vCenter), ibm_server_power (IBM HMC).
 # Individual: params (dc_param or wildcard, start_ts, end_ts). Batch: (dc_list, start_ts, end_ts) or (start_ts, end_ts, dc_list).

@@ -1,11 +1,14 @@
+from __future__ import annotations
 import math
-import random
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import plotly.graph_objects as go
 import dash
-from dash import html, dcc, callback, Input, Output, State
+from dash import html, dcc, callback, Input, Output, State, ALL
 import dash_mantine_components as dmc
 from dash_iconify import DashIconify
+import dash_globe_component
 from src.services import api_client as api
 from src.utils.time_range import default_time_range
 from src.utils.export_helpers import (
@@ -27,6 +30,20 @@ CITY_COORDINATES = {
     "OZBEKISTAN":  {"lat": 41.30, "lon": 69.24},
     "HOLLANDA":    {"lat": 52.37, "lon": 4.90},
     "FRANSA":      {"lat": 48.85, "lon": 2.35},
+}
+
+DC_COORDINATES = {
+    "DC11":      {"lat": 41.037961428839395,  "lon": 28.932597596324076},
+    "DC13":      {"lat": 40.99624339876133,   "lon": 29.171462274232628},
+    "DC15":      {"lat": 41.07269534784402,   "lon": 28.657853053455625},
+    "DC17":      {"lat": 41.10716190578305,   "lon": 28.80144412392166},
+    "DC12":      {"lat": 38.32499698249641,   "lon": 27.14179605187827},
+    "DC14":      {"lat": 39.79603052359003,   "lon": 32.422135925099674},
+    "DC16":      {"lat": 39.78445603075798,   "lon": 32.813705565035825},
+    "AZ11":      {"lat": 40.38073354513049,   "lon": 49.8333150827992},
+    "ICT11":     {"lat": 50.144014412507744,  "lon": 8.739884781472139},
+    "ICT21":     {"lat": 51.528941788230235,  "lon": 0.27753550495317736},
+    "Vadi Ofis": {"lat": 41.112041365157516,  "lon": 28.987566791632712},
 }
 
 REGION_HIERARCHY = {
@@ -57,7 +74,7 @@ REGION_HIERARCHY = {
 }
 
 REGION_ZOOM_TARGETS = {
-    "ISTANBUL":   {"lon": 28.96,  "lat": 41.01, "scale": 40.0},
+    "ISTANBUL":   {"lon": 28.96,  "lat": 41.01, "scale": 33.0},
     "ANKARA":     {"lon": 32.85,  "lat": 39.93, "scale": 15.0},
     "IZMIR":      {"lon": 27.13,  "lat": 38.42, "scale": 15.0},
     "AZERBAYCAN": {"lon": 49.87,  "lat": 40.41, "scale": 6.0},
@@ -69,14 +86,13 @@ REGION_ZOOM_TARGETS = {
 }
 
 _CITY_OFFSETS = [
-    (0.00, 0.00), (0.12, 0.00), (-0.12, 0.00),
-    (0.00, 0.18), (0.00, -0.18), (0.12, 0.18),
-    (-0.12, 0.18), (0.12, -0.18),
+    (0.00,  0.00), (1.50,  0.00), (-1.50,  0.00),
+    (0.00,  1.50), (0.00, -1.50), ( 1.50,  1.50),
+    (-1.50, 1.50), (1.50, -1.50),
 ]
 
 
 def _global_export_table(summaries: list) -> list[dict]:
-    """One row per DC with readable columns for CSV/Excel."""
     rows: list[dict] = []
     for dc in summaries or []:
         if not isinstance(dc, dict):
@@ -102,40 +118,45 @@ def _global_export_table(summaries: list) -> list[dict]:
     return rows
 
 
-def _build_map_dataframe(summaries):
+def _build_globe_data(summaries):
     city_index: dict[str, int] = {}
-    rows = []
+    data = []
     for dc in summaries:
-        site_name = (dc.get("site_name") or "").upper().strip()
-        base = CITY_COORDINATES.get(site_name)
-        if not base:
-            continue
-        idx = city_index.get(site_name, 0)
-        city_index[site_name] = idx + 1
-        dlat, dlon = _CITY_OFFSETS[idx % len(_CITY_OFFSETS)]
         dc_id = dc.get("id", "")
+        site_name = (dc.get("site_name") or "").upper().strip()
+        exact = DC_COORDINATES.get(dc_id)
+        if exact:
+            lat = exact["lat"]
+            lng = exact["lon"]
+        else:
+            base = CITY_COORDINATES.get(site_name)
+            if not base:
+                continue
+            idx = city_index.get(site_name, 0)
+            city_index[site_name] = idx + 1
+            dlat, dlon = _CITY_OFFSETS[idx % len(_CITY_OFFSETS)]
+            lat = base["lat"] + dlat
+            lng = base["lon"] + dlon
         stats = dc.get("stats", {})
         cpu_pct = stats.get("used_cpu_pct", 0.0)
         ram_pct = stats.get("used_ram_pct", 0.0)
-        health = (cpu_pct + ram_pct) / 2.0 if (cpu_pct + ram_pct) > 0 else 0.0
-        rows.append({
-            "id": dc_id,
-            "name": dc.get("name", dc_id),
+        health = (cpu_pct + ram_pct) / 2.0
+        color = "#F04438" if health >= 70 else ("#F79009" if health >= 40 else "#17B26A")
+        capacity = max(dc.get("vm_count", 0) or 0, (dc.get("host_count", 0) or 0) * 5)
+        size = round(min(0.07, max(0.015, 0.015 + math.sqrt(capacity) * 0.0012)), 4)
+        data.append({
+            "lat": float(lat),
+            "lng": float(lng),
+            "dc_id": dc_id,
+            "size": size,
+            "color": color,
             "site_name": dc.get("site_name", ""),
-            "location": dc.get("location", site_name.title()),
-            "lat": base["lat"] + dlat,
-            "lon": base["lon"] + dlon,
-            "host_count": dc.get("host_count", 0),
-            "vm_count": dc.get("vm_count", 0),
-            "platform_count": dc.get("platform_count", 0),
-            "cluster_count": dc.get("cluster_count", 0),
-            "cpu_pct": round(cpu_pct, 1),
-            "ram_pct": round(ram_pct, 1),
+            "status": (dc.get("status") or "active").lower(),
+            "vm_count": dc.get("vm_count", 0) or 0,
+            "host_count": dc.get("host_count", 0) or 0,
             "health": round(health, 1),
-            "total_energy_kw": float(stats.get("total_energy_kw", 0.0) or 0.0),
-            "bubble_size": math.log1p(dc.get("vm_count", 0)),
         })
-    return pd.DataFrame(rows)
+    return data
 
 
 def _health_colors(health_value):
@@ -162,169 +183,6 @@ def _health_colors(health_value):
         "shadow": "rgba(2, 90, 60, 0.35)",
         "gradient": "rgba(150, 245, 220, 0.90)",
     }
-
-
-def _create_map_figure(df):
-    fig = go.Figure()
-
-    if df.empty:
-        fig.update_layout(
-            geo=dict(
-                projection_type="orthographic",
-                showland=True,
-                landcolor="#F4F7FE",
-                showocean=True,
-                oceancolor="rgba(255, 255, 255, 0.95)",
-                showcountries=True,
-                countrycolor="rgba(67, 24, 255, 0.12)",
-                countrywidth=0.8,
-                showcoastlines=True,
-                coastlinecolor="rgba(67, 24, 255, 0.15)",
-                coastlinewidth=0.6,
-                showlakes=False,
-                showrivers=False,
-                framecolor="rgba(67, 24, 255, 0.06)",
-                framewidth=1,
-                lonaxis=dict(showgrid=True, gridcolor="rgba(67, 24, 255, 0.06)", gridwidth=0.5, dtick=15),
-                lataxis=dict(showgrid=True, gridcolor="rgba(67, 24, 255, 0.06)", gridwidth=0.5, dtick=15),
-                projection_rotation=dict(lon=28.96, lat=41.01, roll=0),
-                projection_scale=1.0,
-                bgcolor="rgba(0,0,0,0)",
-            ),
-            margin=dict(l=0, r=0, t=0, b=0),
-            height=600,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            showlegend=False,
-        )
-        return fig
-
-    color_maps = [_health_colors(h) for h in df["health"]]
-
-    shadow_colors = [c["shadow"] for c in color_maps]
-    halo_colors = [c["halo"] for c in color_maps]
-    pin_colors = [c["pin"] for c in color_maps]
-    pin_rgba_colors = [c["pin_rgba"] for c in color_maps]
-    gradient_colors = [c["gradient"] for c in color_maps]
-
-    halo_sizes = [max(32, min(60, math.log1p(row["vm_count"]) * 10 + 24)) for _, row in df.iterrows()]
-    pin_sizes = [max(14, min(26, math.log1p(row["vm_count"]) * 4 + 10)) for _, row in df.iterrows()]
-    shadow_sizes = [max(10, min(18, s * 0.55)) for s in pin_sizes]
-
-    ping_values = [random.randint(8, 180) for _ in range(len(df))]
-
-    hover_template = (
-        "<b style='font-size:15px;color:#2B3674;'>%{customdata[1]}</b><br>"
-        "<span style='color:#7B8EC8;'>━━━━━━━━━━━━━━━━━━━</span><br>"
-        "📍 <span style='color:#A3AED0;'>%{customdata[2]}</span><br>"
-        "💻 <b>%{customdata[3]:,}</b> VMs  ·  🖥️ <b>%{customdata[4]:,}</b> Hosts<br>"
-        "⚡ Health: <b>%{customdata[5]:.1f}%%</b><br>"
-        "<span style='color:#7B8EC8;'>━━━━━━━━━━━━━━━━━━━</span><br>"
-        "🏓 <span style='color:#A3AED0;'>Ping: </span><b>%{customdata[6]}ms</b>"
-        " · <span style='color:#05CD99;'>Active Route</span>"
-        "<extra></extra>"
-    )
-
-    customdata_vals = []
-    for i, (_, row) in enumerate(df.iterrows()):
-        customdata_vals.append([
-            row["id"], row["name"], row["location"],
-            row["vm_count"], row["host_count"], row["health"],
-            ping_values[i], row.get("site_name", ""),
-        ])
-
-    fig.add_trace(go.Scattergeo(
-        lat=df["lat"] - 0.3,
-        lon=df["lon"] + 0.15,
-        mode="markers",
-        marker=dict(
-            size=shadow_sizes,
-            color=shadow_colors,
-            opacity=0.3,
-            symbol="circle",
-        ),
-        hoverinfo="skip",
-        name="",
-    ))
-
-    fig.add_trace(go.Scattergeo(
-        lat=df["lat"],
-        lon=df["lon"],
-        mode="markers",
-        marker=dict(
-            size=halo_sizes,
-            color=halo_colors,
-            opacity=0.5,
-            symbol="circle",
-        ),
-        hoverinfo="skip",
-        name="",
-    ))
-
-    fig.add_trace(go.Scattergeo(
-        lat=df["lat"],
-        lon=df["lon"],
-        mode="markers",
-        marker=dict(
-            size=pin_sizes,
-            color=pin_colors,
-            opacity=1.0,
-            symbol="circle",
-            gradient=dict(
-                type="radial",
-                color=gradient_colors,
-            ),
-            line=dict(
-                width=2,
-                color=pin_rgba_colors,
-            ),
-        ),
-        customdata=customdata_vals,
-        hovertemplate=hover_template,
-        hoverlabel=dict(
-            bgcolor="rgba(255, 255, 255, 0.92)",
-            bordercolor="rgba(67, 24, 255, 0.25)",
-            font=dict(
-                family="DM Sans, sans-serif",
-                size=13,
-                color="#2B3674",
-            ),
-            align="left",
-        ),
-        name="",
-    ))
-
-    fig.update_layout(
-        geo=dict(
-            projection_type="orthographic",
-            showland=True,
-            landcolor="#F4F7FE",
-            showocean=True,
-            oceancolor="rgba(255, 255, 255, 0.95)",
-            showcountries=True,
-            countrycolor="rgba(67, 24, 255, 0.12)",
-            countrywidth=0.8,
-            showcoastlines=True,
-            coastlinecolor="rgba(67, 24, 255, 0.15)",
-            coastlinewidth=0.6,
-            showlakes=False,
-            showrivers=False,
-            framecolor="rgba(67, 24, 255, 0.06)",
-            framewidth=1,
-            lonaxis=dict(showgrid=True, gridcolor="rgba(67, 24, 255, 0.06)", gridwidth=0.5, dtick=15),
-            lataxis=dict(showgrid=True, gridcolor="rgba(67, 24, 255, 0.06)", gridwidth=0.5, dtick=15),
-            projection_rotation=dict(lon=28.96, lat=41.01, roll=0),
-            projection_scale=1.0,
-            bgcolor="rgba(0,0,0,0)",
-        ),
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=600,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=False,
-    )
-
-    return fig
 
 
 def _pct_color(v):
@@ -397,9 +255,103 @@ def _build_region_menu(summaries):
         radius="md",
         chevronPosition="right",
         multiple=True,
-        value=[],
+        value=["Turkey Region"],
         className="region-accordion",
+        style={"width": "100%"},
         children=items,
+    )
+
+
+def build_3d_rack_overlay(dc_id, dc_name, racks):
+    halls: dict[str, list] = {}
+    for r in racks:
+        h = r.get("hall_name", "Hall A")
+        halls.setdefault(h, []).append(r)
+
+    hall_layers = []
+    for delay_idx, (hall_name, hall_racks) in enumerate(halls.items()):
+        rack_cards = []
+        for card_idx, rack in enumerate(hall_racks):
+            status = (rack.get("status") or "unknown").lower()
+            status_colors = {
+                "active": ("#17B26A", "#E6F9F0"),
+                "planned": ("#2E90FA", "#EBF5FF"),
+                "inactive": ("#F04438", "#FEF3F2"),
+                "unknown": ("#98A2B3", "#F9FAFB"),
+            }
+            dot_color, bg_color = status_colors.get(status, status_colors["unknown"])
+            rack_cards.append(
+                html.Div(
+                    className="rack-micro-card",
+                    style={"--delay": str(delay_idx), "--card-delay": str(card_idx), "background": bg_color},
+                    children=[
+                        dmc.Group(justify="space-between", mb=4, children=[
+                            dmc.Text(rack.get("name", "—"), fw=700, size="xs", c="#1B2559"),
+                            html.Div(style={"width": "8px", "height": "8px", "borderRadius": "50%", "background": dot_color, "flexShrink": 0}),
+                        ]),
+                        dmc.Text(rack.get("rack_type", "Standard"), size="xs", c="#A3AED0"),
+                        dmc.Text(f"{rack.get('u_height', '—')}U", size="xs", c="#4318FF", fw=600),
+                    ],
+                )
+            )
+        hall_layers.append(
+            html.Div(
+                className="hall-layer",
+                style={"--delay": str(delay_idx)},
+                children=[
+                    dmc.Text(hall_name, className="hall-title", mb="sm"),
+                    html.Div(className="rack-micro-grid", children=rack_cards),
+                ],
+            )
+        )
+
+    return html.Div(
+        style={
+            "position": "fixed",
+            "inset": 0,
+            "background": "rgba(8,10,30,0.72)",
+            "backdropFilter": "blur(8px)",
+            "zIndex": 9999,
+            "display": "flex",
+            "alignItems": "center",
+            "justifyContent": "center",
+        },
+        children=[
+            html.Div(
+                className="hologram-scene",
+                children=[
+                    html.Div(
+                        className="dc-hologram-base",
+                        children=[
+                            dmc.Group(justify="space-between", align="center", mb="lg", children=[
+                                dmc.Group(gap="sm", children=[
+                                    DashIconify(icon="solar:server-square-bold-duotone", width=24, color="#05CD99"),
+                                    dmc.Text(dc_name, fw=800, size="lg", c="#FFFFFF"),
+                                    dmc.Badge("3D View", size="xs", variant="light", color="teal"),
+                                ]),
+                                dmc.Group(gap="xs", children=[
+                                    dcc.Link(
+                                        dmc.Button("Racks Details", size="xs", variant="light", color="teal",
+                                                   leftSection=DashIconify(icon="solar:server-bold-duotone", width=14)),
+                                        href=f"/datacenter/{dc_id}",
+                                        style={"textDecoration": "none"},
+                                    ),
+                                    dmc.Button(
+                                        id="close-3d-overlay-btn",
+                                        children=DashIconify(icon="solar:close-circle-bold", width=20, color="#98A2B3"),
+                                        variant="subtle",
+                                        color="gray",
+                                        size="xs",
+                                        p=4,
+                                    ),
+                                ]),
+                            ]),
+                            html.Div(className="hologram-halls", children=hall_layers),
+                        ],
+                    ),
+                ],
+            ),
+        ],
     )
 
 
@@ -416,7 +368,7 @@ def build_region_detail_panel(region, tr):
         )
 
     total_vms = sum(dc.get("vm_count", 0) for dc in dcs)
-    total_hosts = sum(dc.get("host_count", 0) for dc in dcs)
+    total_hosts_sum = sum(dc.get("host_count", 0) for dc in dcs)
 
     dc_cards = []
     for dc in dcs:
@@ -444,8 +396,8 @@ def build_region_detail_panel(region, tr):
         health_color = "red" if health_val >= 70 else ("orange" if health_val >= 40 else "teal")
 
         total_kw = float(energy.get("total_kw", 0.0) or 0.0)
-        total_hosts = intel.get("hosts", 0) + power.get("hosts", 0)
-        total_vms_dc = intel.get("vms", 0) + power.get("lpar_count", 0)
+        dc_hosts = intel.get("hosts", 0) + power.get("hosts", 0)
+        dc_vms = intel.get("vms", 0) + power.get("lpar_count", 0)
 
         vmware = platforms.get("vmware", {})
         nutanix = platforms.get("nutanix", {})
@@ -504,11 +456,11 @@ def build_region_detail_panel(region, tr):
                             dmc.Stack(gap=4, justify="center", children=[
                                 dmc.Group(gap="xs", children=[
                                     DashIconify(icon="solar:server-bold-duotone", width=12, color="#A3AED0"),
-                                    dmc.Text(f"{total_hosts:,}h", size="xs", c="#2B3674", fw=600),
+                                    dmc.Text(f"{dc_hosts:,}h", size="xs", c="#2B3674", fw=600),
                                 ]),
                                 dmc.Group(gap="xs", children=[
                                     DashIconify(icon="solar:laptop-bold-duotone", width=12, color="#A3AED0"),
-                                    dmc.Text(f"{total_vms_dc:,}vm", size="xs", c="#2B3674", fw=600),
+                                    dmc.Text(f"{dc_vms:,}vm", size="xs", c="#2B3674", fw=600),
                                 ]),
                                 dmc.Group(gap="xs", children=[
                                     DashIconify(icon="material-symbols:bolt-outline", width=12, color="#A3AED0"),
@@ -523,17 +475,14 @@ def build_region_detail_panel(region, tr):
                         dmc.Text(arch_text, size="xs", c="#A3AED0"),
                     ]),
                     dmc.Group(justify="flex-end", children=[
-                        dcc.Link(
-                            dmc.Button(
-                                "Rack Details",
-                                variant="light",
-                                color="indigo",
-                                radius="md",
-                                size="xs",
-                                rightSection=DashIconify(icon="solar:arrow-right-bold-duotone", width=14),
-                            ),
-                            href=f"/datacenter/{dc_id}",
-                            style={"textDecoration": "none"},
+                        dmc.Button(
+                            "Detail",
+                            id={"type": "open-3d-hologram-btn", "index": dc_id},
+                            variant="light",
+                            color="indigo",
+                            radius="md",
+                            size="xs",
+                            leftSection=DashIconify(icon="solar:layers-bold-duotone", width=14),
                         ),
                     ]),
                 ],
@@ -565,7 +514,7 @@ def build_region_detail_panel(region, tr):
                             dmc.Group(gap="sm", children=[
                                 dmc.Badge(f"{len(dcs)} DCs", color="indigo", variant="light"),
                                 dmc.Badge(f"{total_vms:,} VMs", color="teal", variant="light"),
-                                dmc.Badge(f"{total_hosts:,} Hosts", color="gray", variant="light"),
+                                dmc.Badge(f"{total_hosts_sum:,} Hosts", color="gray", variant="light"),
                             ]),
                         ],
                     ),
@@ -584,15 +533,18 @@ def build_region_detail_panel(region, tr):
 def build_global_view(time_range=None):
     tr = time_range or default_time_range()
     summaries = api.get_all_datacenters_summary(tr)
-    df = _build_map_dataframe(summaries)
-    map_fig = _create_map_figure(df)
-
+    globe_data = _build_globe_data(summaries)
     export_rows = _global_export_table(summaries)
 
     return html.Div([
         dcc.Store(id="selected-region-store", data=None),
         dcc.Store(id="global-export-store", data={"rows": export_rows}),
+        dcc.Store(id="current-view-mode", data="globe"),
+        dcc.Store(id="selected-building-dc-store", data=None),
+        dcc.Store(id="last-clicked-dc-id", data=None),
         dcc.Download(id="global-export-download"),
+        dcc.Interval(id="building-reveal-timer", interval=1800, n_intervals=0, max_intervals=1, disabled=True),
+
         dmc.Paper(
             p="xl",
             radius="md",
@@ -616,11 +568,7 @@ def build_global_view(time_range=None):
                                     gap="sm",
                                     align="center",
                                     children=[
-                                        DashIconify(
-                                            icon="solar:globe-bold-duotone",
-                                            width=28,
-                                            color="#4318FF",
-                                        ),
+                                        DashIconify(icon="solar:globe-bold-duotone", width=28, color="#4318FF"),
                                         html.H2(
                                             "Global View",
                                             style={
@@ -639,17 +587,10 @@ def build_global_view(time_range=None):
                                 ),
                                 dmc.Badge(
                                     children=[
-                                        dmc.Group(
-                                            gap=6,
-                                            align="center",
-                                            children=[
-                                                DashIconify(
-                                                    icon="solar:calendar-mark-bold-duotone",
-                                                    width=13,
-                                                ),
-                                                f"{tr.get('start', '')} \u2013 {tr.get('end', '')}",
-                                            ],
-                                        )
+                                        dmc.Group(gap=6, align="center", children=[
+                                            DashIconify(icon="solar:calendar-mark-bold-duotone", width=13),
+                                            f"{tr.get('start', '')} \u2013 {tr.get('end', '')}",
+                                        ])
                                     ],
                                     variant="light",
                                     color="indigo",
@@ -663,59 +604,27 @@ def build_global_view(time_range=None):
                             gap="sm",
                             align="center",
                             children=[
-                                dmc.Group(
-                                    gap=6,
-                                    align="center",
-                                    children=[
-                                        dmc.Text("Export", size="xs", c="dimmed"),
-                                        dmc.Button(
-                                            "CSV",
-                                            id="global-export-csv",
-                                            size="xs",
-                                            variant="light",
-                                            color="gray",
-                                        ),
-                                        dmc.Button(
-                                            "Excel",
-                                            id="global-export-xlsx",
-                                            size="xs",
-                                            variant="light",
-                                            color="gray",
-                                        ),
-                                        dmc.Button(
-                                            "PDF",
-                                            size="xs",
-                                            variant="light",
-                                            color="gray",
-                                            **{"data-pdf-target": "global-export-pdf"},
-                                        ),
-                                    ],
-                                ),
+                                dmc.Group(gap=6, align="center", children=[
+                                    dmc.Text("Export", size="xs", c="dimmed"),
+                                    dmc.Button("CSV", id="global-export-csv", size="xs", variant="light", color="gray"),
+                                    dmc.Button("Excel", id="global-export-xlsx", size="xs", variant="light", color="gray"),
+                                    dmc.Button(
+                                        "PDF", size="xs", variant="light", color="gray",
+                                        **{"data-pdf-target": "global-export-pdf"},
+                                    ),
+                                ]),
                                 dmc.Badge(
                                     children=[
-                                        dmc.Group(
-                                            gap=6,
-                                            align="center",
-                                            children=[
-                                                DashIconify(
-                                                    icon="solar:check-circle-bold-duotone",
-                                                    width=15,
-                                                    color="#05CD99",
-                                                ),
-                                                f"{len(summaries)} Active DCs",
-                                            ],
-                                        )
+                                        dmc.Group(gap=6, align="center", children=[
+                                            DashIconify(icon="solar:check-circle-bold-duotone", width=15, color="#05CD99"),
+                                            f"{len(summaries)} Active DCs",
+                                        ])
                                     ],
                                     variant="light",
                                     color="teal",
                                     radius="xl",
                                     size="lg",
-                                    style={
-                                        "textTransform": "none",
-                                        "fontWeight": 600,
-                                        "letterSpacing": 0,
-                                        "padding": "8px 14px",
-                                    },
+                                    style={"textTransform": "none", "fontWeight": 600, "letterSpacing": 0, "padding": "8px 14px"},
                                 ),
                             ],
                         ),
@@ -724,89 +633,122 @@ def build_global_view(time_range=None):
             ],
         ),
 
-        dmc.Grid(
-            gutter="lg",
-            style={"margin": "0 32px"},
+        html.Div(
+            id="globe-layer",
+            style={"display": "block"},
             children=[
-                dmc.GridCol(
-                    span=8,
+                dmc.Grid(
+                    gutter="lg",
+                    style={"margin": "0 32px"},
                     children=[
-                        dmc.Paper(
-                            radius="lg",
-                            style={
-                                "overflow": "hidden",
-                                "boxShadow": "0 2px 16px rgba(67,24,255,0.06), 0 1px 4px rgba(0,0,0,0.04)",
-                                "border": "1px solid rgba(255,255,255,0.7)",
-                            },
+                        dmc.GridCol(
+                            span=8,
                             children=[
-                                dmc.Group(
-                                    justify="flex-end",
-                                    px="md",
-                                    pt="md",
+                                dmc.Paper(
+                                    radius="lg",
+                                    style={
+                                        "overflow": "hidden",
+                                        "boxShadow": "0 2px 16px rgba(67,24,255,0.06), 0 1px 4px rgba(0,0,0,0.04)",
+                                        "border": "1px solid rgba(255,255,255,0.7)",
+                                    },
                                     children=[
-                                        dmc.Button(
-                                            "Reset",
-                                            id="global-map-reset-btn",
-                                            variant="subtle",
-                                            color="gray",
-                                            radius="md",
-                                            size="xs",
-                                            leftSection=DashIconify(icon="solar:refresh-circle-bold-duotone", width=16),
+                                        dmc.Group(
+                                            justify="flex-end",
+                                            px="md",
+                                            pt="md",
+                                            children=[
+                                                dmc.Button(
+                                                    "Reset",
+                                                    id="global-map-reset-btn",
+                                                    variant="subtle",
+                                                    color="gray",
+                                                    radius="md",
+                                                    size="xs",
+                                                    leftSection=DashIconify(icon="solar:refresh-circle-bold-duotone", width=16),
+                                                ),
+                                            ],
                                         ),
-                                    ],
-                                ),
-                                html.Div(
-                                    style={"width": "100%", "overflow": "hidden"},
-                                    children=[
-                                        dcc.Graph(
-                                            id="global-map-graph",
-                                            figure=map_fig,
-                                            config={"displayModeBar": False, "scrollZoom": True, "responsive": True},
-                                            style={"height": "600px", "width": "100%", "borderRadius": "12px"},
+                                        html.Div(
+                                            style={"width": "100%", "overflow": "hidden"},
+                                            children=[
+                                                dash_globe_component.DashGlobe(
+                                                    id="global-map-graph",
+                                                    pointsData=globe_data,
+                                                    height=600,
+                                                ),
+                                            ],
                                         ),
                                     ],
                                 ),
                             ],
                         ),
-                    ],
-                ),
-                dmc.GridCol(
-                    span=4,
-                    children=[
-                        dmc.Paper(
-                            id="region-menu-panel",
-                            radius="lg",
-                            h=600,
-                            p="lg",
-                            style={
-                                "boxShadow": "0 2px 16px rgba(67,24,255,0.06), 0 1px 4px rgba(0,0,0,0.04)",
-                                "border": "1px solid rgba(255,255,255,0.7)",
-                                "background": "rgba(255,255,255,0.90)",
-                            },
+                        dmc.GridCol(
+                            span=4,
                             children=[
-                                dmc.Group(
-                                    justify="space-between",
-                                    align="center",
-                                    mb="sm",
+                                dmc.Paper(
+                                    id="region-menu-panel",
+                                    radius="lg",
+                                    h=660,
+                                    p="lg",
+                                    style={
+                                        "boxShadow": "0 2px 16px rgba(67,24,255,0.06), 0 1px 4px rgba(0,0,0,0.04)",
+                                        "border": "1px solid rgba(255,255,255,0.7)",
+                                        "background": "rgba(255,255,255,0.90)",
+                                    },
                                     children=[
-                                        dmc.Group(gap="sm", children=[
-                                            DashIconify(icon="solar:map-bold-duotone", width=20, color="#4318FF"),
-                                            dmc.Text("Regions", fw=700, size="md", c="#2B3674"),
-                                        ]),
-                                        dmc.Badge(f"{len(summaries)} DCs", variant="light", color="indigo", size="sm"),
+                                        dmc.Group(
+                                            justify="space-between",
+                                            align="center",
+                                            mb="sm",
+                                            children=[
+                                                dmc.Group(gap="sm", children=[
+                                                    DashIconify(icon="solar:map-bold-duotone", width=20, color="#4318FF"),
+                                                    dmc.Text("Regions", fw=700, size="md", c="#2B3674"),
+                                                ]),
+                                                dmc.Badge(f"{len(summaries)} DCs", variant="light", color="indigo", size="sm"),
+                                            ],
+                                        ),
+                                        dmc.Divider(mb="sm", color="rgba(67,24,255,0.08)"),
+                                        dmc.ScrollArea(
+                                            h=560,
+                                            type="auto",
+                                            children=[_build_region_menu(summaries)],
+                                        ),
                                     ],
-                                ),
-                                dmc.Divider(mb="sm", color="rgba(67,24,255,0.08)"),
-                                dmc.ScrollArea(
-                                    h=510,
-                                    type="auto",
-                                    children=[_build_region_menu(summaries)],
                                 ),
                             ],
                         ),
                     ],
                 ),
             ],
+        ),
+
+        html.Div(
+            id="building-reveal-layer",
+            style={"display": "none"},
+            children=[
+                html.Div(
+                    className="building-reveal-inner",
+                    children=[
+                        html.Div("🏢", className="building-reveal-icon", style={"fontSize": "96px"}),
+                        html.Div(id="building-reveal-dc-name", className="building-reveal-name"),
+                        html.Div(
+                            className="building-reveal-dots",
+                            children=[
+                                html.Span(className="brd-dot"),
+                                html.Span(className="brd-dot"),
+                                html.Span(className="brd-dot"),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+
+        html.Div(
+            id="floor-map-layer",
+            style={"display": "none"},
+            children=[],
         ),
 
         dcc.Loading(
@@ -831,6 +773,12 @@ def build_global_view(time_range=None):
                     )
                 ],
             ),
+        ),
+
+        html.Div(
+            id="global-3d-modal-container",
+            style={"display": "none", "pointerEvents": "none"},
+            children=[],
         ),
     ])
 
@@ -960,17 +908,14 @@ def build_dc_info_card(dc_id, tr, site_name=""):
                 dmc.Text(arch_text, size="sm", c="#A3AED0"),
             ]),
             dmc.Group(justify="flex-end", children=[
-                dcc.Link(
-                    dmc.Button(
-                        "Rack Details",
-                        variant="light",
-                        color="indigo",
-                        radius="md",
-                        size="sm",
-                        rightSection=DashIconify(icon="solar:arrow-right-bold-duotone", width=16),
-                    ),
-                    href=f"/datacenter/{dc_id}",
-                    style={"textDecoration": "none"},
+                dmc.Button(
+                    "Detail",
+                    id={"type": "open-3d-hologram-btn", "index": dc_id},
+                    variant="light",
+                    color="indigo",
+                    radius="md",
+                    size="sm",
+                    leftSection=DashIconify(icon="solar:layers-bold-duotone", width=16),
                 ),
             ]),
         ],

@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 from copy import deepcopy
 from typing import Any, Optional
@@ -229,6 +230,35 @@ def get_sla_by_dc(tr: Optional[dict]) -> dict[str, dict]:
         return by_dc if isinstance(by_dc, dict) else _clone(_EMPTY_SLA_BY_DC)
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
         return _clone(_EMPTY_SLA_BY_DC)
+
+
+def get_dc_racks(dc_id: str) -> dict:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_dc_racks(dc_id)
+    try:
+        from urllib.parse import quote as _quote
+        enc = _quote(dc_id, safe="")
+        data = _get_json(_client_dc, f"/api/v1/datacenters/{enc}/racks")
+        return data if isinstance(data, dict) else {"racks": [], "summary": {}}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {"racks": [], "summary": {}}
+
+
+def get_rack_devices(dc_id: str, rack_name: str) -> dict:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_rack_devices(dc_id, rack_name)
+    try:
+        from urllib.parse import quote as _quote
+        enc_dc = _quote(dc_id, safe="")
+        enc_rack = _quote(rack_name, safe="")
+        data = _get_json(_client_dc, f"/api/v1/datacenters/{enc_dc}/racks/{enc_rack}/devices")
+        return data if isinstance(data, dict) else {"devices": []}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {"devices": []}
 
 
 def get_dc_s3_pools(dc_code: str, tr: Optional[dict]) -> dict:

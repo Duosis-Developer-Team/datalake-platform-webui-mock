@@ -1,3 +1,4 @@
+from __future__ import annotations
 # VMware SQL query definitions.
 # Two source tables:
 #   datacenter_metrics  — DC-level aggregated VMware metrics (legacy, kept for energy & overview)

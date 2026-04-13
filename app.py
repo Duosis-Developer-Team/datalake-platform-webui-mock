@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import logging
 import os
@@ -681,108 +682,315 @@ def update_phys_inv_chart(click_data, reset_clicks, state):
     return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
 
+# ---------------------------------------------------------------------------
+# Global View — DashGlobe callbacks
+# ---------------------------------------------------------------------------
+
+
 @app.callback(
     dash.Output("global-detail-panel", "children"),
-    dash.Input("global-map-graph", "clickData"),
+    dash.Output("last-clicked-dc-id", "data"),
+    dash.Output("current-view-mode", "data", allow_duplicate=True),
+    dash.Output("selected-building-dc-store", "data"),
+    dash.Input("global-map-graph", "clickedPoint"),
+    dash.State("last-clicked-dc-id", "data"),
     dash.State("app-time-range", "data"),
     prevent_initial_call=True,
 )
-def update_global_detail_from_pin(click_data, time_range):
+def handle_globe_pin_click(clicked_point, last_dc_id, time_range):
+    if not clicked_point:
+        return [], None, dash.no_update, dash.no_update
+    dc_id = clicked_point.get("dc_id")
+    site_name = clicked_point.get("site_name", "")
+    if not dc_id:
+        return [], None, dash.no_update, dash.no_update
+    # Double-click same pin → building reveal mode
+    if dc_id == last_dc_id:
+        return dash.no_update, dc_id, "building", {"dc_id": dc_id, "dc_name": dc_id}
+    # First click → show DC info card
+    tr = time_range or default_time_range()
+    from src.pages.global_view import build_dc_info_card
+    panel = build_dc_info_card(dc_id, tr, site_name=site_name)
+    return panel, dc_id, dash.no_update, dash.no_update
+
+
+@app.callback(
+    dash.Output("global-3d-modal-container", "children"),
+    dash.Output("global-3d-modal-container", "style"),
+    dash.Input({"type": "open-3d-hologram-btn", "index": ALL}, "n_clicks"),
+    dash.State("global-3d-modal-container", "style"),
+    prevent_initial_call=True,
+)
+def open_3d_hologram_modal(btn_clicks, current_style):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update
+    if all(x is None for x in btn_clicks):
+        return dash.no_update, dash.no_update
+    trig = ctx.triggered[0]["prop_id"].split(".")[0]
+    try:
+        trig_dict = json.loads(trig)
+    except Exception:
+        return dash.no_update, dash.no_update
+    dc_id = trig_dict.get("index")
+    if not dc_id:
+        return dash.no_update, dash.no_update
+    info = api.get_dc_details(dc_id, default_time_range())
+    dc_name = info.get("meta", {}).get("name", dc_id)
+    racks_resp = api.get_dc_racks(dc_id)
+    racks = racks_resp.get("racks", [])
+    if racks:
+        from src.pages.global_view import build_3d_rack_overlay
+        content = build_3d_rack_overlay(dc_id, dc_name, racks)
+        new_style = dict(current_style) if current_style else {}
+        new_style["display"] = "flex"
+        new_style["pointerEvents"] = "auto"
+        return content, new_style
+    return [], current_style
+
+
+@app.callback(
+    dash.Output("global-3d-modal-container", "style", allow_duplicate=True),
+    dash.Input("close-3d-overlay-btn", "n_clicks"),
+    dash.State("global-3d-modal-container", "style"),
+    prevent_initial_call=True,
+)
+def close_3d_hologram_modal(n_clicks, current_style):
+    if not n_clicks:
+        return dash.no_update
+    new_style = dict(current_style) if current_style else {}
+    new_style["display"] = "none"
+    new_style["pointerEvents"] = "none"
+    return new_style
+
+
+@app.callback(
+    dash.Output("globe-layer", "style"),
+    dash.Output("building-reveal-layer", "style"),
+    dash.Output("floor-map-layer", "style"),
+    dash.Output("building-reveal-timer", "disabled"),
+    dash.Output("building-reveal-timer", "n_intervals"),
+    dash.Output("building-reveal-dc-name", "children"),
+    dash.Input("current-view-mode", "data"),
+    dash.State("selected-building-dc-store", "data"),
+    prevent_initial_call=True,
+)
+def view_controller(mode, dc_store):
+    shown = {"display": "block"}
+    hidden = {"display": "none"}
+    reveal_shown = {"display": "flex"}
+    dc_label = (dc_store or {}).get("dc_name", "")
+    if mode == "building":
+        return hidden, reveal_shown, hidden, False, 0, dc_label
+    if mode == "floor_map":
+        return hidden, hidden, shown, True, dash.no_update, dc_label
+    # Default: globe
+    return shown, hidden, hidden, True, dash.no_update, dc_label
+
+
+@app.callback(
+    dash.Output("current-view-mode", "data", allow_duplicate=True),
+    dash.Output("floor-map-layer", "children"),
+    dash.Input("building-reveal-timer", "n_intervals"),
+    dash.State("selected-building-dc-store", "data"),
+    dash.State("current-view-mode", "data"),
+    prevent_initial_call=True,
+)
+def advance_to_floor_map(n_intervals, dc_store, current_mode):
+    if not n_intervals or current_mode != "building" or not dc_store:
+        return dash.no_update, dash.no_update
+    dc_id = dc_store.get("dc_id", "")
+    dc_name = dc_store.get("dc_name", dc_id)
+    racks_resp = api.get_dc_racks(dc_id)
+    racks = racks_resp.get("racks", [])
+    from src.pages.floor_map import build_floor_map_layout
+    return "floor_map", build_floor_map_layout(dc_id, dc_name, racks)
+
+
+@app.callback(
+    dash.Output("current-view-mode", "data", allow_duplicate=True),
+    dash.Output("last-clicked-dc-id", "data", allow_duplicate=True),
+    dash.Input("back-to-global-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def back_to_globe(n_clicks):
+    if not n_clicks:
+        return dash.no_update, dash.no_update
+    return "globe", None
+
+
+@app.callback(
+    dash.Output("floor-map-rack-detail", "children"),
+    dash.Input("floor-map-graph", "clickData"),
+    dash.State("selected-building-dc-store", "data"),
+    prevent_initial_call=True,
+)
+def show_rack_detail(click_data, dc_store):
     if not click_data or "points" not in click_data or not click_data["points"]:
-        return []
+        return dash.no_update
     point = click_data["points"][0]
     custom = point.get("customdata")
     if not custom or not custom[0]:
-        return []
-    dc_id = custom[0]
-    site_name = custom[7] if len(custom) > 7 else ""
-    tr = time_range or default_time_range()
-    from src.pages.global_view import build_dc_info_card
-    return build_dc_info_card(dc_id, tr, site_name=site_name)
+        return dash.no_update
+    dc_id = custom[0][0] if isinstance(custom[0], list) else custom[0]
+    rack_name = custom[0][1] if isinstance(custom[0], list) else (custom[1] if len(custom) > 1 else "")
+    status = custom[0][2] if isinstance(custom[0], list) else (custom[2] if len(custom) > 2 else "unknown")
+    u_height = custom[0][3] if isinstance(custom[0], list) else (custom[3] if len(custom) > 3 else 42)
+    energy = custom[0][4] if isinstance(custom[0], list) else (custom[4] if len(custom) > 4 else "?")
+    rack_type = custom[0][5] if isinstance(custom[0], list) else (custom[5] if len(custom) > 5 else "")
 
+    try:
+        u_height = int(u_height)
+    except (ValueError, TypeError):
+        u_height = 42
 
-app.clientside_callback(
-    """
-    function(clickData) {
-        if (!clickData || !clickData.points || !clickData.points.length)
-            return window.dash_clientside.no_update;
-        var point = clickData.points[0];
-        if (!point.customdata || !point.customdata[0])
-            return window.dash_clientside.no_update;
-        var outer = document.getElementById('global-map-graph');
-        if (!outer) return window.dash_clientside.no_update;
-        var gd = outer.querySelector('.js-plotly-plot') || outer;
-        if (!gd._fullLayout || !gd._fullLayout.geo) return window.dash_clientside.no_update;
-        var rot = gd._fullLayout.geo.projection.rotation;
-        var startLon = rot.lon, startLat = rot.lat;
-        var startScale = gd._fullLayout.geo.projection.scale || 1.0;
-        var siteName = (point.customdata && point.customdata[7]) ? point.customdata[7].toUpperCase() : '';
-        var tLon = point.lon, tLat = point.lat;
-        var tScale = siteName === 'ISTANBUL' ? 40.0 : (['ANKARA', 'IZMIR'].indexOf(siteName) >= 0 ? 15.0 : 6.0);
-        var dur = 1100, t0 = null;
-        function ease(t) { return t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
-        function step(ts) {
-            if (!t0) t0 = ts;
-            var p = Math.min((ts-t0)/dur, 1), e = ease(p);
-            window.Plotly.relayout(gd, {
-                'geo.projection.rotation.lon': startLon+(tLon-startLon)*e,
-                'geo.projection.rotation.lat': startLat+(tLat-startLat)*e,
-                'geo.projection.scale':        startScale+(tScale-startScale)*e
-            });
-            if (p < 1) requestAnimationFrame(step);
-        }
-        requestAnimationFrame(step);
-        return window.dash_clientside.no_update;
-    }
-    """,
-    dash.Output("global-map-graph", "figure", allow_duplicate=True),
-    dash.Input("global-map-graph", "clickData"),
-    prevent_initial_call=True,
-)
+    from src.services import api_client as _api
+    devices_resp = _api.get_rack_devices(dc_id, rack_name)
+    devices = devices_resp.get("devices", [])
+
+    status_color = {
+        "active": "#17B26A", "planned": "#2E90FA",
+        "inactive": "#F04438", "unknown": "#98A2B3",
+    }.get((status or "unknown").lower(), "#98A2B3")
+
+    from dash import html as _html
+    import dash_mantine_components as _dmc
+    from dash_iconify import DashIconify as _DI
+
+    unit_slots = []
+    occupied: dict[int, dict] = {}
+    for dev in devices:
+        slot = dev.get("slot_start", 1) or 1
+        occupied[slot] = dev
+
+    for u in range(u_height, 0, -1):
+        dev = occupied.get(u)
+        if dev:
+            spans = max(1, dev.get("u_size", 1) or 1)
+            dev_color = "#EEF4FF"
+            dev_border = "#C7D7FE"
+            label = dev.get("name") or dev.get("type", f"Device @U{u}")
+            unit_slots.append(
+                _html.Div(
+                    style={
+                        "height": f"{spans * 20}px",
+                        "background": dev_color,
+                        "border": f"1px solid {dev_border}",
+                        "borderRadius": "3px",
+                        "marginBottom": "2px",
+                        "display": "flex",
+                        "alignItems": "center",
+                        "padding": "0 6px",
+                        "fontSize": "10px",
+                        "fontWeight": 600,
+                        "color": "#3538CD",
+                        "overflow": "hidden",
+                        "whiteSpace": "nowrap",
+                    },
+                    children=f"U{u} — {label}",
+                )
+            )
+        else:
+            unit_slots.append(
+                _html.Div(
+                    style={
+                        "height": "20px",
+                        "background": "#1E293B",
+                        "border": "1px solid #2D3748",
+                        "borderRadius": "2px",
+                        "marginBottom": "2px",
+                        "display": "flex",
+                        "alignItems": "center",
+                        "padding": "0 6px",
+                        "fontSize": "9px",
+                        "color": "#475569",
+                    },
+                    children=f"U{u}",
+                )
+            )
+
+    return _html.Div([
+        # Status bar
+        _html.Div(
+            style={"height": "4px", "background": status_color, "borderRadius": "4px 4px 0 0"},
+        ),
+        _html.Div(
+            style={"padding": "16px"},
+            children=[
+                # Header
+                _dmc.Group(
+                    gap="sm",
+                    mb="md",
+                    children=[
+                        _dmc.ThemeIcon(
+                            _DI(icon="solar:server-bold-duotone", width=18),
+                            size="lg", radius="md", color="indigo", variant="light",
+                        ),
+                        _html.Div([
+                            _dmc.Text(rack_name or "Rack", fw=700, size="md", c="#1B2559"),
+                            _dmc.Text(f"{dc_id} · {rack_type}", size="xs", c="#A3AED0"),
+                        ]),
+                        _dmc.Badge(
+                            (status or "unknown").title(),
+                            color={"active": "teal", "planned": "blue", "inactive": "red"}.get(
+                                (status or "").lower(), "gray"
+                            ),
+                            variant="light", size="sm", ml="auto",
+                        ),
+                    ],
+                ),
+                # Quick stats
+                _dmc.SimpleGrid(
+                    cols=2, spacing="xs", mb="md",
+                    children=[
+                        _dmc.Paper(
+                            p="xs", radius="md", withBorder=True,
+                            children=[
+                                _dmc.Text("U Height", size="xs", c="#A3AED0"),
+                                _dmc.Text(f"{u_height}U", fw=700, size="lg", c="#1B2559"),
+                            ],
+                        ),
+                        _dmc.Paper(
+                            p="xs", radius="md", withBorder=True,
+                            children=[
+                                _dmc.Text("Power", size="xs", c="#A3AED0"),
+                                _dmc.Text(f"{energy} kW", fw=700, size="lg", c="#1B2559"),
+                            ],
+                        ),
+                    ],
+                ),
+                # Rack diagram
+                _dmc.Text("Rack Units", size="xs", fw=600, c="#344054", mb="xs"),
+                _html.Div(
+                    className="rack-unit-cabinet",
+                    children=[
+                        _html.Div(className="rack-rail"),
+                        _html.Div(
+                            style={"flex": 1, "padding": "4px 6px", "overflowY": "auto"},
+                            children=unit_slots,
+                        ),
+                        _html.Div(className="rack-rail rack-rail-right"),
+                    ],
+                ),
+                _dmc.Text(
+                    f"{len(devices)} device(s) installed",
+                    size="xs", c="#A3AED0", mt="xs", ta="right",
+                ),
+            ],
+        ),
+    ])
 
 
 @app.callback(
     dash.Output("global-detail-panel", "children", allow_duplicate=True),
+    dash.Output("global-map-graph", "focusRegion", allow_duplicate=True),
     dash.Input("global-map-reset-btn", "n_clicks"),
     prevent_initial_call=True,
 )
 def reset_global_detail(n_clicks):
     if not n_clicks:
-        return dash.no_update
-    return []
-
-
-app.clientside_callback(
-    """
-    function(n_clicks) {
-        if (!n_clicks) return window.dash_clientside.no_update;
-        var outer = document.getElementById('global-map-graph');
-        if (!outer) return window.dash_clientside.no_update;
-        var gd = outer.querySelector('.js-plotly-plot') || outer;
-        if (!gd._fullLayout || !gd._fullLayout.geo) return window.dash_clientside.no_update;
-        var rot = gd._fullLayout.geo.projection.rotation;
-        var startLon = rot.lon, startLat = rot.lat;
-        var startScale = gd._fullLayout.geo.projection.scale || 1.0;
-        var dur = 1000, t0 = null;
-        function ease(t) { return t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
-        function step(ts) {
-            if (!t0) t0 = ts;
-            var p = Math.min((ts-t0)/dur, 1), e = ease(p);
-            window.Plotly.relayout(gd, {
-                'geo.projection.rotation.lon': startLon+(28.96-startLon)*e,
-                'geo.projection.rotation.lat': startLat+(41.01-startLat)*e,
-                'geo.projection.scale':        startScale+(1.0-startScale)*e
-            });
-            if (p < 1) requestAnimationFrame(step);
-        }
-        requestAnimationFrame(step);
-        return window.dash_clientside.no_update;
-    }
-    """,
-    dash.Output("global-map-graph", "figure", allow_duplicate=True),
-    dash.Input("global-map-reset-btn", "n_clicks"),
-    prevent_initial_call=True,
-)
+        return dash.no_update, dash.no_update
+    return [], {"lat": 38.0, "lng": 30.0, "zoom": 3}
 
 
 @app.callback(
@@ -792,7 +1000,6 @@ app.clientside_callback(
 )
 def update_region_store(n_clicks_list):
     import time as _time
-    import json
     ctx = dash.callback_context
     if not ctx.triggered:
         return dash.no_update
@@ -814,38 +1021,26 @@ def update_region_store(n_clicks_list):
     }
 
 
-app.clientside_callback(
-    """
-    function(storeData) {
-        if (!storeData || !storeData.lon) return window.dash_clientside.no_update;
-        var outer = document.getElementById('global-map-graph');
-        if (!outer) return window.dash_clientside.no_update;
-        var gd = outer.querySelector('.js-plotly-plot') || outer;
-        if (!gd._fullLayout || !gd._fullLayout.geo) return window.dash_clientside.no_update;
-        var rot = gd._fullLayout.geo.projection.rotation;
-        var startLon = rot.lon, startLat = rot.lat;
-        var startScale = gd._fullLayout.geo.projection.scale || 1.0;
-        var tLon = storeData.lon, tLat = storeData.lat, tScale = storeData.scale;
-        var dur = 1100, t0 = null;
-        function ease(t) { return t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
-        function step(ts) {
-            if (!t0) t0 = ts;
-            var p = Math.min((ts-t0)/dur, 1), e = ease(p);
-            window.Plotly.relayout(gd, {
-                'geo.projection.rotation.lon': startLon+(tLon-startLon)*e,
-                'geo.projection.rotation.lat': startLat+(tLat-startLat)*e,
-                'geo.projection.scale':        startScale+(tScale-startScale)*e
-            });
-            if (p < 1) requestAnimationFrame(step);
-        }
-        requestAnimationFrame(step);
-        return window.dash_clientside.no_update;
-    }
-    """,
-    dash.Output("global-map-graph", "figure", allow_duplicate=True),
+@app.callback(
+    dash.Output("global-map-graph", "focusRegion"),
     dash.Input("selected-region-store", "data"),
     prevent_initial_call=True,
 )
+def update_globe_camera(region):
+    if not region:
+        return dash.no_update
+    lat = region.get("lat")
+    lng = region.get("lon")
+    scale = region.get("scale", 6.0)
+    if scale >= 35:
+        zoom = 10
+    elif scale >= 10:
+        zoom = 8
+    else:
+        zoom = 5
+    if lat is not None and lng is not None:
+        return {"lat": float(lat), "lng": float(lng), "zoom": zoom}
+    return dash.no_update
 
 
 @app.callback(
@@ -1225,4 +1420,4 @@ def update_intel_disk_trend(disk_name, host, time_range, pathname):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8050, use_reloader=False)
+    app.run(debug=True, dev_tools_ui=False, port=8050, use_reloader=False)

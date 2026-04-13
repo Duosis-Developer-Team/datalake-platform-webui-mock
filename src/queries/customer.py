@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Customer (tenant) SQL query definitions.
 # Filter by VM/Host naming pattern (e.g. ILIKE '%boyner%').
 # Sources: vm_metrics, nutanix_vm_metrics, ibm_lpar_general, ibm_vios_general, ibm_server_general.

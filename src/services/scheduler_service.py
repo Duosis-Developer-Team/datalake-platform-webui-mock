@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Background scheduler service.
 # Keeps the cache warm by calling DatabaseService.refresh_all_data() every 15 minutes.
 # Uses APScheduler's BackgroundScheduler so the job runs in a daemon thread without

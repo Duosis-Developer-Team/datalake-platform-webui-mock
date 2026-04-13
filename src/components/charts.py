@@ -1,3 +1,4 @@
+from __future__ import annotations
 import plotly.graph_objects as go
 
 _LEGEND_STYLE = dict(

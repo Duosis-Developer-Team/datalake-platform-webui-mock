@@ -1,3 +1,4 @@
+from __future__ import annotations
 # DC Detail view - Capacity Planning
 # Tab hierarchy: Summary | Virtualization (Classic / Hyperconverged / Power) | Backup | Physical Inventory
 import json

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """UI brand title from environment (demo / white-label)."""
 
 import os

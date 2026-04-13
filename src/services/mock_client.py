@@ -32,6 +32,14 @@ def get_dc_details(dc_id: str, tr: Optional[dict]) -> dict:
     return mock_dc.get_dc_detail(dc_id, tr)
 
 
+def get_dc_racks(dc_id: str) -> dict:
+    return mock_dc.get_dc_racks(dc_id)
+
+
+def get_rack_devices(dc_id: str, rack_name: str) -> dict:
+    return mock_dc.get_rack_devices(dc_id, rack_name)
+
+
 def get_customer_list() -> list[str]:
     return mock_customers.get_customer_list()
 
