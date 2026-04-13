@@ -7,7 +7,7 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     license='MIT',
-    description='A MapLibre GL component for Dash',
+    description='A Globe.gl component for Dash',
     install_requires=['dash'],
     package_data={
         'dash_globe_component': ['*.js', '*.map', '*.json'],

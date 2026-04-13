@@ -1,4 +1,4 @@
-"""Shared UI helpers (mirrors Datalake-Platform-GUI src/utils/ui_tokens)."""
+"""Shared UI helpers for Settings and Query Explorer (DMC + DashIconify)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,31 @@ import dash_mantine_components as dmc
 from dash import html
 from dash_iconify import DashIconify
 
+# Brand palette (aligned with product identity)
 PRIMARY = "#552cf8"
 PRIMARY_END = "#a092ff"
+BG_PAGE = "#f5f6f9"
 ON_SURFACE = "#2c2f31"
 ON_DIM = "#595c5e"
+
+# Standardized table header style used across all settings pages
+_TH_STYLE_BASE: dict[str, Any] = {
+    "fontSize": "11px",
+    "fontWeight": 600,
+    "textTransform": "uppercase",
+    "letterSpacing": "0.05em",
+    "color": "#6c757d",
+    "padding": "8px 12px",
+    "borderBottom": "1px solid #eef1f4",
+}
+
+
+def th_left() -> dict[str, Any]:
+    return {**_TH_STYLE_BASE, "textAlign": "left"}
+
+
+def th_center() -> dict[str, Any]:
+    return {**_TH_STYLE_BASE, "textAlign": "center"}
 
 
 def card_style(
@@ -19,6 +40,7 @@ def card_style(
     border_left: str | None = None,
     padding: str = "md",
 ) -> dict[str, Any]:
+    """Paper-style container props for dmc.Paper."""
     style: dict[str, Any] = {
         "borderRadius": "12px",
         "boxShadow": "0 4px 24px rgba(44, 47, 49, 0.06)",
@@ -36,6 +58,7 @@ def gradient_button_style() -> dict[str, Any]:
         "border": "none",
         "color": "#fff",
         "fontWeight": 600,
+        "transition": "opacity 0.18s ease, box-shadow 0.18s ease",
     }
 
 
@@ -45,7 +68,11 @@ def html_submit_button_gradient(
     icon: str | None = None,
     style_extra: dict[str, Any] | None = None,
 ) -> html.Button:
-    """Native HTML submit button with gradient styling (parity with GUI)."""
+    """Native HTML submit button with gradient styling.
+
+    Uses html.Button instead of dmc.Button because DMC's Button does not
+    accept ``type='submit'`` in older 0.14.x releases.
+    """
     base: dict[str, Any] = {
         **gradient_button_style(),
         "cursor": "pointer",
@@ -76,6 +103,7 @@ def html_submit_button_light(
     small: bool = False,
     style_extra: dict[str, Any] | None = None,
 ) -> html.Button:
+    """Light-style native submit for filters and inline actions."""
     schemes: dict[str, dict[str, str]] = {
         "gray": {"background": "#f8f9fa", "color": "#495057", "border": "1px solid #dee2e6"},
         "red": {"background": "#fff5f5", "color": "#fa5252", "border": "1px solid #ffc9c9"},
@@ -97,8 +125,26 @@ def html_submit_button_light(
     return html.Button(label, type="submit", style=base)
 
 
+def status_badge(label: str, variant: str = "light", color: str = "gray") -> dmc.Badge:
+    """Map semantic status to Mantine badge."""
+    color_map = {
+        "active": "green",
+        "inactive": "gray",
+        "connected": "green",
+        "disconnected": "gray",
+        "degraded": "orange",
+        "draft": "yellow",
+        "success": "indigo",
+        "warning": "orange",
+        "error": "red",
+    }
+    c = color_map.get(variant, color)
+    return dmc.Badge(label.upper(), variant=variant, color=c, size="sm", radius="xl")
+
+
 def section_header(title: str, subtitle: str | None = None, icon: str | None = None) -> html.Div:
-    left = []
+    """Page section title row with optional icon and subtitle."""
+    left: list = []
     if icon:
         left.append(
             dmc.ThemeIcon(
@@ -114,11 +160,14 @@ def section_header(title: str, subtitle: str | None = None, icon: str | None = N
             gap=2,
             children=[
                 dmc.Text(title, fw=800, size="lg", c=ON_SURFACE),
-                dmc.Text(subtitle, size="sm", c=ON_DIM) if subtitle else None,
+                dmc.Text(subtitle, size="xs", c=ON_DIM) if subtitle else None,
             ],
         )
     )
-    return html.Div(dmc.Group(gap="md", align="flex-start", children=left))
+    return html.Div(
+        dmc.Group(gap="md", align="flex-start", children=left),
+        style={"marginBottom": "16px"},
+    )
 
 
 def kpi_card(
@@ -129,6 +178,7 @@ def kpi_card(
     trend: str | None = None,
     color: str = "indigo",
 ) -> dmc.Paper:
+    """Compact KPI metric tile."""
     top = dmc.Group(
         justify="space-between",
         align="flex-start",
@@ -151,10 +201,13 @@ def kpi_card(
             else html.Div(),
         ],
     )
-    children = [top]
+    children: list = [top]
     if trend:
         children.append(dmc.Text(trend, size="xs", c="dimmed", mt=4))
-    return dmc.Paper(children=children, **card_style())
+    return dmc.Paper(
+        children=children,
+        **card_style(),
+    )
 
 
 def section_nav_card(
@@ -165,6 +218,7 @@ def section_nav_card(
     icon: str = "solar:widget-bold-duotone",
     badges: list[str] | None = None,
 ) -> dmc.Card:
+    """Clickable landing card linking to a settings area."""
     badge_row = (
         dmc.Group(
             gap="xs",
@@ -201,7 +255,14 @@ def section_nav_card(
             ),
             badge_row,
             dmc.Anchor(
-                dmc.Button("Open", variant="light", color="indigo", size="xs", radius="md"),
+                dmc.Button(
+                    "Open",
+                    variant="light",
+                    color="indigo",
+                    size="xs",
+                    radius="md",
+                    styles={"root": {"transition": "opacity 0.18s ease"}},
+                ),
                 href=href,
                 underline=False,
             ),
@@ -215,13 +276,44 @@ def section_nav_card(
             "border": "1px solid rgba(171, 173, 176, 0.2)",
             "boxShadow": "0 8px 28px rgba(85, 44, 248, 0.08)",
             "background": "#fff",
+            "transition": "box-shadow 0.2s ease",
         },
         children=[inner],
     )
 
 
 def settings_page_shell(children: list, *, max_width: str = "1280px") -> html.Div:
+    """Outer wrapper for settings content with consistent max-width."""
     return html.Div(
         style={"maxWidth": max_width, "margin": "0 auto", "paddingBottom": "48px"},
         children=children,
     )
+
+
+def relative_time(ts) -> str:
+    """Human-readable relative time from a datetime-like value."""
+    if ts is None:
+        return "—"
+    try:
+        from datetime import datetime, timezone
+
+        if isinstance(ts, str):
+            s = ts.replace("Z", "+00:00")
+            try:
+                ts = datetime.fromisoformat(s)
+            except ValueError:
+                return ts[:19]
+        if hasattr(ts, "tzinfo") and getattr(ts, "tzinfo", None) is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = now - ts
+        sec = int(delta.total_seconds())
+        if sec < 60:
+            return f"{sec}s ago"
+        if sec < 3600:
+            return f"{sec // 60}m ago"
+        if sec < 86400:
+            return f"{sec // 3600}h ago"
+        return f"{sec // 86400}d ago"
+    except Exception:
+        return str(ts)[:19]

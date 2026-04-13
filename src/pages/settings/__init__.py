@@ -1,2 +1,1 @@
-from __future__ import annotations
-"""Mock Settings package."""
+"""Settings pages (RBAC-gated)."""

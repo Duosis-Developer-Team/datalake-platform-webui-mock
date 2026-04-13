@@ -116,6 +116,25 @@ def _is_mock_mode() -> bool:
     return (os.getenv("APP_MODE") or "").strip().lower() == "mock"
 
 
+def _auth_headers() -> dict[str, str]:
+    """Attach JWT for microservices when Flask request has an authenticated user."""
+    if _is_mock_mode():
+        return {}
+    try:
+        from flask import g, has_request_context
+
+        if has_request_context():
+            uid = getattr(g, "auth_user_id", None)
+            if uid is not None:
+                from src.auth.api_jwt import create_api_token
+
+                tok = create_api_token(int(uid))
+                return {"Authorization": f"Bearer {tok}"}
+    except Exception:
+        pass
+    return {}
+
+
 def _clone(value: Any) -> Any:
     return deepcopy(value)
 
@@ -134,7 +153,7 @@ def _build_time_params(tr: Optional[dict]) -> dict[str, str]:
 
 
 def _get_json(client: httpx.Client, path: str, params: Optional[dict[str, str]] = None) -> Any:
-    response = client.get(path, params=params)
+    response = client.get(path, params=params, headers=_auth_headers())
     response.raise_for_status()
     return response.json()
 

@@ -1,1 +1,5 @@
-{"version": "0.1.0", "description": "A MapLibre GL component for Dash"}
+{
+  "name": "dash_globe_component",
+  "version": "0.1.0",
+  "description": "A Globe.gl component for Dash"
+}

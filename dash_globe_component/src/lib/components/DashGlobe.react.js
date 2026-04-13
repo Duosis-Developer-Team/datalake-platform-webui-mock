@@ -40,6 +40,7 @@ const DashGlobe = ({ id, setProps, pointsData, focusRegion, height }) => {
 
     const buildMarker = useCallback((d) => {
         const status = (d.status || 'unknown').toLowerCase();
+        // Use health-based color from Python if available, fall back to status color
         const color  = d.color || STATUS_COLOR[status] || STATUS_COLOR.unknown;
 
         const el = document.createElement('div');
@@ -51,6 +52,7 @@ const DashGlobe = ({ id, setProps, pointsData, focusRegion, height }) => {
             <div class="dc-pin-dot" style="background:${color};box-shadow:0 0 0 2.5px #fff,0 2px 8px ${color}88"></div>
         `;
 
+        // Hover popup
         el.addEventListener('mouseenter', () => {
             const map = mapRef.current;
             if (!map) return;
@@ -104,6 +106,7 @@ const DashGlobe = ({ id, setProps, pointsData, focusRegion, height }) => {
             }, 120);
         });
 
+        // Click: report to Dash + fly in close
         el.addEventListener('click', () => {
             if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
             if (setProps) setProps({ clickedPoint: { ...d, _ts: Date.now() } });
@@ -137,6 +140,7 @@ const DashGlobe = ({ id, setProps, pointsData, focusRegion, height }) => {
         const map = mapRef.current;
         if (!map || !focusRegion) return;
 
+        // Prefer explicit zoom prop; fall back to altitude conversion for backwards compat
         const zoom = focusRegion.zoom != null
             ? focusRegion.zoom
             : focusRegion.altitude != null

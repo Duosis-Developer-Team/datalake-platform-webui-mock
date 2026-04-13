@@ -1,2 +1,1 @@
-from __future__ import annotations
-"""Mock IAM settings pages."""
+"""Identity & Access Management settings pages."""

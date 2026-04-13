@@ -7,7 +7,7 @@ from importlib import reload
 
 import pytest
 
-from src.pages.global_view import CITY_COORDINATES, _build_map_dataframe
+from src.pages.global_view import CITY_COORDINATES, _build_globe_data
 from src.services import mock_client
 from src.services.mock_data import daa_scenarios
 from src.services.mock_data.customers import MOCK_CUSTOMER_NAMES, get_customer_resources
@@ -78,10 +78,10 @@ def test_mock_summaries_site_names_on_global_map_keys() -> None:
         assert sn in CITY_COORDINATES, f"site_name {sn!r} must exist in CITY_COORDINATES"
 
 
-def test_mock_global_map_dataframe_has_rows() -> None:
-    df = _build_map_dataframe(get_all_datacenters_summary())
-    assert not df.empty
-    assert len(df) == len(MOCK_DC_CODES)
+def test_mock_global_globe_data_has_points() -> None:
+    pts = _build_globe_data(get_all_datacenters_summary())
+    assert isinstance(pts, list)
+    assert len(pts) == len(MOCK_DC_CODES)
 
 
 def test_mock_customer_resources_match_view_schema() -> None:

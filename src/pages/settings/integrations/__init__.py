@@ -1,2 +1,1 @@
-from __future__ import annotations
-"""Mock Integrations settings pages."""
+"""External integrations (LDAP, AuraNotify, ...)."""

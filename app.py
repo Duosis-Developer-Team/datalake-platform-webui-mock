@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ import dash
 import plotly.graph_objects as go
 from dash import Dash, html, dcc, _dash_renderer, ALL
 import dash_mantine_components as dmc
+from dash_iconify import DashIconify
 from dotenv import load_dotenv
 from flask import request
 
@@ -21,7 +23,6 @@ logging.basicConfig(
 )
 
 from src.components.sidebar import create_sidebar_nav
-from src.utils.branding import get_brand_title
 from src.components.backup_panel import build_netbackup_panel, build_zerto_panel, build_veeam_panel
 from src.components.charts import (
     create_capacity_area_chart,
@@ -39,6 +40,7 @@ from src.utils.time_range import (
 from src.utils.format_units import pct_float, smart_storage
 from src.components.s3_panel import build_dc_s3_panel, build_customer_s3_panel
 from src.pages.home import _phys_inv_bar_figure
+from src.utils.branding import get_brand_title
 
 _dash_renderer._set_react_version("18.2.0")
 
@@ -56,6 +58,25 @@ app = Dash(
     title=get_brand_title(),
 )
 server = app.server
+
+from src.auth.config import SECRET_KEY
+
+server.secret_key = SECRET_KEY
+
+try:
+    from src.auth.migration import run_migrations
+    from src.auth.seed import seed_all
+
+    run_migrations()
+    seed_all()
+except Exception as _auth_exc:
+    logging.getLogger(__name__).warning("Auth DB bootstrap failed: %s", _auth_exc)
+
+from src.auth.routes import auth_bp
+from src.auth.middleware import register_middleware
+
+server.register_blueprint(auth_bp)
+register_middleware(server)
 
 APP_BUILD_ID = (os.environ.get("APP_BUILD_ID") or "dev").strip()
 
@@ -77,13 +98,15 @@ def _prevent_stale_dash_cache(response):
 _log = logging.getLogger(__name__)
 _log.info("APP_BUILD_ID=%s", APP_BUILD_ID)
 
-from src.pages import home, datacenters, dc_view, customer_view, query_explorer, global_view, region_drilldown
+from src.pages import home, datacenters, dc_view, customer_view, query_explorer, global_view, region_drilldown, dc_detail
+from src.pages import login as login_page_mod
 from src.pages.settings import shell as settings_shell
+from src.components.access_denied import build_access_denied
+from src.pages.dc_view import _bps_to_gbps, _build_compute_tab
 from src.pages.settings.iam import roles_callbacks  # noqa: F401
 from src.pages.settings.iam import teams_callbacks  # noqa: F401
 from src.pages.settings.iam import users_callbacks  # noqa: F401
 from src.utils.app_mode import is_mock_mode
-from src.pages.dc_view import _bps_to_gbps, _build_compute_tab
 
 _default_tr = default_time_range()
 _custom_st, _custom_en = time_range_to_bounds(_default_tr)
@@ -100,6 +123,7 @@ _default_customer = _customers[0] if _customers else DEFAULT_CUSTOMER_NAME
 _customer_options = [{"value": c, "label": c} for c in _customers]
 
 _sidebar = html.Div(
+    id="sidebar-shell",
     style={
         "width": "260px",
         "position": "fixed",
@@ -205,74 +229,59 @@ _sidebar = html.Div(
     ],
 )
 
-_mantine_children = [
-    dcc.Location(id="url", refresh=False),
-    html.Div(
-        APP_BUILD_ID,
-        id="app-deploy-revision",
-        title="Deploy revision (env APP_BUILD_ID)",
-        style={
-            "position": "fixed",
-            "bottom": "2px",
-            "right": "8px",
-            "fontSize": "10px",
-            "color": "#ADB5BD",
-            "zIndex": 9998,
-            "pointerEvents": "none",
-            "userSelect": "none",
-        },
-    ),
-    dcc.Store(id="app-time-range", data=_default_tr),
-    html.Div(id="export-pdf-clientside-dummy", style={"display": "none"}),
-    # Always-mounted triggers for clientside PDF callback (page-visible buttons use data-pdf-target + assets/pdf_export_trigger.js).
-    html.Div(
-        [
-            html.Button(
-                id=hid,
-                n_clicks=0,
-                type="button",
-                title="pdf-trigger",
-                style={"display": "none"},
-            )
-            for hid in (
-                "home-export-pdf",
-                "datacenters-export-pdf",
-                "dc-export-pdf",
-                "global-export-pdf",
-                "customer-export-pdf",
-                "qe-export-pdf",
-            )
-        ],
-        id="pdf-export-hidden-triggers",
-        style={"display": "none"},
-    ),
-    html.Div(
-        [
-            _sidebar,
-            html.Div(
-                dcc.Loading(
-                    id="main-content-loading",
-                    type="circle",
-                    color="#4318FF",
-                    children=html.Div(id="main-content", children=[]),
-                    style={"minHeight": "240px"},
+_mantine_children: list = [
+        dcc.Location(id="url", refresh=False),
+        html.Div(
+            APP_BUILD_ID,
+            id="app-deploy-revision",
+            title="Deploy revision (env APP_BUILD_ID)",
+            style={
+                "position": "fixed",
+                "bottom": "2px",
+                "right": "8px",
+                "fontSize": "10px",
+                "color": "#ADB5BD",
+                "zIndex": 9998,
+                "pointerEvents": "none",
+                "userSelect": "none",
+            },
+        ),
+        dcc.Store(id="app-time-range", data=_default_tr),
+        dcc.Store(id="auth-user-store", data=None),
+        dcc.Store(id="auth-permissions-store", data=None),
+        html.Div(id="export-pdf-clientside-dummy", style={"display": "none"}),
+        html.Div(
+            [
+                _sidebar,
+                html.Div(
+                    id="main-shell",
+                    children=[
+                        dcc.Loading(
+                            id="main-content-loading",
+                            type="circle",
+                            color="#4318FF",
+                            target_components={"main-content": "children"},
+                            children=html.Div(id="main-content", children=[]),
+                            style={"minHeight": "240px"},
+                        ),
+                    ],
+                    style={
+                        "marginLeft": "292px",
+                        "padding": "30px",
+                        "minHeight": "100vh",
+                        "width": "calc(100% - 292px)",
+                        "backgroundColor": "#F4F7FE",
+                    },
                 ),
-                style={
-                    "marginLeft": "292px",
-                    "padding": "30px",
-                    "minHeight": "100vh",
-                    "width": "calc(100% - 292px)",
-                    "backgroundColor": "#F4F7FE",
-                },
-            ),
-        ],
-        style={"display": "flex", "backgroundColor": "#F4F7FE", "minHeight": "100vh"},
-    ),
+            ],
+            style={"display": "flex", "backgroundColor": "#F4F7FE", "minHeight": "100vh"},
+        ),
 ]
+
 if is_mock_mode():
     from src.components.chatbot import build_mock_chatbot
 
-    _mantine_children.append(build_mock_chatbot())
+    _mantine_children = _mantine_children + [build_mock_chatbot()]
 
 app.layout = dmc.MantineProvider(
     theme={
@@ -352,7 +361,78 @@ app.clientside_callback(
     dash.Input("url", "pathname"),
 )
 def update_sidebar_nav(pathname):
-    return create_sidebar_nav(pathname or "/")
+    from flask import g, has_request_context
+
+    from src.auth.permission_service import user_effective_map
+
+    pmap = None
+    uname = ""
+    if has_request_context():
+        uid = getattr(g, "auth_user_id", None)
+        u = getattr(g, "auth_user", None) or {}
+        uname = str(u.get("username") or "")
+        if uid:
+            pmap = user_effective_map(int(uid))
+    return create_sidebar_nav(pathname or "/", pmap, uname)
+
+
+@app.callback(
+    dash.Output("sidebar-shell", "style"),
+    dash.Output("main-shell", "style"),
+    dash.Input("url", "pathname"),
+)
+def layout_shell(pathname):
+    pathname = pathname or "/"
+    base_sidebar = {
+        "width": "260px",
+        "position": "fixed",
+        "top": "16px",
+        "left": "16px",
+        "height": "calc(100vh - 32px)",
+        "zIndex": 999,
+        "padding": "24px",
+        "backgroundColor": "#FFFFFF",
+        "overflowY": "auto",
+        "overflowX": "hidden",
+        "borderRadius": "16px",
+        "boxShadow": "0 10px 30px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)",
+        "display": "flex",
+        "flexDirection": "column",
+    }
+    base_main = {
+        "marginLeft": "292px",
+        "padding": "30px",
+        "minHeight": "100vh",
+        "width": "calc(100% - 292px)",
+        "backgroundColor": "#F4F7FE",
+    }
+    if pathname == "/login":
+        return {**base_sidebar, "display": "none"}, {
+            **base_main,
+            "marginLeft": "0",
+            "width": "100%",
+        }
+    return base_sidebar, base_main
+
+
+@app.callback(
+    dash.Output("auth-user-store", "data"),
+    dash.Output("auth-permissions-store", "data"),
+    dash.Input("url", "pathname"),
+)
+def sync_auth_stores(pathname):
+    from flask import g, has_request_context
+
+    from src.auth.permission_service import user_effective_map
+
+    if not has_request_context():
+        return dash.no_update, dash.no_update
+    uid = getattr(g, "auth_user_id", None)
+    if not uid:
+        return None, None
+    pmap = user_effective_map(int(uid))
+    u = getattr(g, "auth_user", None) or {}
+    return {"id": int(uid), "username": u.get("username")}, pmap
 
 
 @app.callback(
@@ -447,41 +527,81 @@ def update_time_range_store(preset, start_dt, end_dt, current):
     dash.State("url", "search"),
 )
 def render_main_content(pathname, time_range, selected_customer, search):
+    from flask import g, has_request_context, request as flask_request
+
+    from src.auth.config import AUTH_DISABLED
+    from src.auth.permission_service import can_view, get_visible_sections, resolve_pathname_to_page_code
+
     pathname = pathname or "/"
     tr = time_range or default_time_range()
+
+    if pathname == "/login":
+        nxt, err = login_page_mod.parse_login_search(search)
+        return login_page_mod.build_login_layout(nxt, error=err)
+
+    uid = getattr(g, "auth_user_id", None) if has_request_context() else None
+    if not AUTH_DISABLED and uid is None:
+        _log.warning(
+            "main-content: missing auth user; rendering empty layout pathname=%s "
+            "flask_path=%s has_request_context=%s",
+            pathname,
+            getattr(flask_request, "path", None),
+            has_request_context(),
+        )
+        return html.Div()
+
+    page_code = resolve_pathname_to_page_code(pathname)
+    vis = (
+        get_visible_sections(int(uid), page_code)
+        if uid and page_code and not str(pathname).startswith("/settings")
+        else None
+    )
+
+    if (
+        page_code
+        and uid
+        and not str(pathname).startswith("/settings")
+        and not can_view(int(uid), page_code)
+    ):
+        return build_access_denied()
+
     if pathname in ("/", ""):
-        return home.build_overview(tr)
+        return home.build_overview(tr, visible_sections=vis)
     if pathname == "/datacenters":
-        return datacenters.build_datacenters(tr)
+        return datacenters.build_datacenters(tr, visible_sections=vis)
     if pathname and pathname.startswith("/datacenter/"):
         dc_id = pathname.replace("/datacenter/", "").strip("/")
-        return dc_view.build_dc_view(dc_id, tr)
+        return dc_view.build_dc_view(dc_id, tr, visible_sections=vis)
     if pathname == "/global-view":
-        return global_view.build_global_view(tr)
+        return global_view.build_global_view(tr, visible_sections=vis)
     if pathname == "/customer-view":
-        return customer_view.build_customer_layout(tr, selected_customer)
+        return customer_view.build_customer_layout(tr, selected_customer, visible_sections=vis)
     if pathname == "/query-explorer":
-        return query_explorer.layout()
+        return query_explorer.layout(visible_sections=vis)
     if pathname == "/analytics":
         if is_mock_mode():
             from src.pages import analytics as analytics_page
 
             return analytics_page.build_analytics(tr)
-        return home.build_overview(tr)
+        return home.build_overview(tr, visible_sections=vis)
     if pathname == "/daa":
         if is_mock_mode():
             from src.pages import daa as daa_page
 
             return daa_page.build_daa_page(tr)
-        return home.build_overview(tr)
+        return home.build_overview(tr, visible_sections=vis)
+    if pathname and pathname.startswith("/dc-detail/"):
+        dc_id = pathname.replace("/dc-detail/", "").strip("/")
+        return dc_detail.build_dc_detail(dc_id, tr, visible_sections=vis)
     if pathname == "/region-drilldown":
         from urllib.parse import parse_qs
+
         params = parse_qs((search or "").lstrip("?"))
         region = params.get("region", [""])[0]
         return region_drilldown.build_region_drilldown(region, tr)
     if pathname.startswith("/settings"):
-        return settings_shell.build_settings_page(pathname, search)
-    return home.build_overview(tr)
+        return settings_shell.build_settings_page(pathname, int(uid), search)
+    return home.build_overview(tr, visible_sections=vis)
 
 
 @app.callback(
@@ -682,11 +802,6 @@ def update_phys_inv_chart(click_data, reset_clicks, state):
     return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
 
-# ---------------------------------------------------------------------------
-# Global View — DashGlobe callbacks
-# ---------------------------------------------------------------------------
-
-
 @app.callback(
     dash.Output("global-detail-panel", "children"),
     dash.Output("last-clicked-dc-id", "data"),
@@ -704,10 +819,11 @@ def handle_globe_pin_click(clicked_point, last_dc_id, time_range):
     site_name = clicked_point.get("site_name", "")
     if not dc_id:
         return [], None, dash.no_update, dash.no_update
-    # Double-click same pin → building reveal mode
+
     if dc_id == last_dc_id:
         return dash.no_update, dc_id, "building", {"dc_id": dc_id, "dc_name": dc_id}
-    # First click → show DC info card
+
+    from src.utils.time_range import default_time_range
     tr = time_range or default_time_range()
     from src.pages.global_view import build_dc_info_card
     panel = build_dc_info_card(dc_id, tr, site_name=site_name)
@@ -727,25 +843,33 @@ def open_3d_hologram_modal(btn_clicks, current_style):
         return dash.no_update, dash.no_update
     if all(x is None for x in btn_clicks):
         return dash.no_update, dash.no_update
+
     trig = ctx.triggered[0]["prop_id"].split(".")[0]
     try:
         trig_dict = json.loads(trig)
     except Exception:
         return dash.no_update, dash.no_update
+
     dc_id = trig_dict.get("index")
     if not dc_id:
         return dash.no_update, dash.no_update
+
+    from src.services import api_client as api
+    from src.pages.global_view import build_3d_rack_overlay
+
     info = api.get_dc_details(dc_id, default_time_range())
     dc_name = info.get("meta", {}).get("name", dc_id)
+
     racks_resp = api.get_dc_racks(dc_id)
     racks = racks_resp.get("racks", [])
+
     if racks:
-        from src.pages.global_view import build_3d_rack_overlay
         content = build_3d_rack_overlay(dc_id, dc_name, racks)
-        new_style = dict(current_style) if current_style else {}
+        new_style = current_style.copy() if current_style else {}
         new_style["display"] = "flex"
         new_style["pointerEvents"] = "auto"
         return content, new_style
+
     return [], current_style
 
 
@@ -758,10 +882,11 @@ def open_3d_hologram_modal(btn_clicks, current_style):
 def close_3d_hologram_modal(n_clicks, current_style):
     if not n_clicks:
         return dash.no_update
-    new_style = dict(current_style) if current_style else {}
+    new_style = current_style.copy() if current_style else {}
     new_style["display"] = "none"
     new_style["pointerEvents"] = "none"
     return new_style
+
 
 
 @app.callback(
@@ -773,7 +898,6 @@ def close_3d_hologram_modal(n_clicks, current_style):
     dash.Output("building-reveal-dc-name", "children"),
     dash.Input("current-view-mode", "data"),
     dash.State("selected-building-dc-store", "data"),
-    prevent_initial_call=True,
 )
 def view_controller(mode, dc_store):
     shown = {"display": "block"}
@@ -781,10 +905,10 @@ def view_controller(mode, dc_store):
     reveal_shown = {"display": "flex"}
     dc_label = (dc_store or {}).get("dc_name", "")
     if mode == "building":
+        # Reset n_intervals to 0 so the timer fires fresh every time
         return hidden, reveal_shown, hidden, False, 0, dc_label
     if mode == "floor_map":
         return hidden, hidden, shown, True, dash.no_update, dc_label
-    # Default: globe
     return shown, hidden, hidden, True, dash.no_update, dc_label
 
 
@@ -819,6 +943,143 @@ def back_to_globe(n_clicks):
     return "globe", None
 
 
+def _build_rack_unit_diagram(rack_name, u_height, devices, fill, dark):
+    """Render a CSS-based rack unit diagram showing installed devices."""
+    # Build a map: slot -> device (position is bottom U of device)
+    slot_map = {}
+    for d in devices:
+        pos = d.get("position")
+        if pos is not None:
+            slot_map[int(pos)] = d
+
+    # Device type → visual style
+    DEVICE_STYLES = {
+        "patch panel":   {"bg": "#EFF8FF", "border": "#B2DDFF", "color": "#175CD3", "icon": "solar:gamepad-bold-duotone"},
+        "server":        {"bg": "#ECFDF3", "border": "#A9EFC5", "color": "#027A48", "icon": "solar:server-bold-duotone"},
+        "switch":        {"bg": "#FDF4FF", "border": "#E9D7FE", "color": "#6941C6", "icon": "solar:routing-bold-duotone"},
+        "storage":       {"bg": "#FFF6ED", "border": "#FDD49A", "color": "#B54708", "icon": "solar:hard-drive-bold-duotone"},
+        "router":        {"bg": "#F0F9FF", "border": "#B9E6FE", "color": "#026AA2", "icon": "solar:routing-bold-duotone"},
+        "pdu":           {"bg": "#FEF3F2", "border": "#FECDCA", "color": "#B42318", "icon": "solar:bolt-bold-duotone"},
+        "ups":           {"bg": "#FFFAEB", "border": "#FEDF89", "color": "#B54708", "icon": "solar:battery-charge-bold-duotone"},
+    }
+
+    def _style_for(device_type):
+        dt = (device_type or "").lower()
+        for key, val in DEVICE_STYLES.items():
+            if key in dt:
+                return val
+        return {"bg": "#F9FAFB", "border": "#EAECF0", "color": "#344054", "icon": "solar:cpu-bold-duotone"}
+
+    total_u = max(u_height or 47, max((int(d.get("position") or 0) for d in devices), default=0) + 1)
+    # Show top-down: slot total_u → 1
+    rows = []
+    u = total_u
+    while u >= 1:
+        device = slot_map.get(u)
+        u_label = html.Div(
+            str(u),
+            style={"width": "22px", "flexShrink": "0", "textAlign": "right",
+                   "color": "#B0B7C3", "fontSize": "9px", "fontFamily": "DM Mono, monospace",
+                   "paddingRight": "6px", "lineHeight": "22px"},
+        )
+        if device:
+            s = _style_for(device.get("device_type") or device.get("role") or "")
+            dev_name = str(device.get("name") or "")
+            # Truncate long names
+            display_name = dev_name if len(dev_name) <= 28 else dev_name[:25] + "…"
+            dtype = str(device.get("device_type") or device.get("role") or "Device")
+            row_content = html.Div(
+                style={
+                    "flex": "1", "height": "22px",
+                    "background": s["bg"],
+                    "border": f"1px solid {s['border']}",
+                    "borderRadius": "4px",
+                    "display": "flex", "alignItems": "center",
+                    "gap": "5px", "padding": "0 6px",
+                    "cursor": "default",
+                },
+                title=f"{dev_name} — {dtype}",
+                children=[
+                    DashIconify(icon=s["icon"], width=11, color=s["color"]),
+                    html.Span(display_name, style={
+                        "fontSize": "9px", "color": s["color"],
+                        "fontWeight": "600", "overflow": "hidden",
+                        "whiteSpace": "nowrap", "textOverflow": "ellipsis",
+                        "fontFamily": "DM Sans, sans-serif",
+                    }),
+                ],
+            )
+        else:
+            row_content = html.Div(style={
+                "flex": "1", "height": "22px",
+                "background": "rgba(0,0,0,0)",
+                "borderRadius": "4px",
+            })
+
+        rows.append(html.Div(
+            style={"display": "flex", "alignItems": "center", "gap": "2px",
+                   "borderBottom": "1px solid rgba(234,236,240,0.5)"},
+            children=[u_label, row_content],
+        ))
+        u -= 1
+
+    occupied = len([d for d in devices if d.get("position") is not None])
+
+    return html.Div(children=[
+        # Header
+        html.Div(
+            style={"display": "flex", "alignItems": "center", "justifyContent": "space-between",
+                   "marginBottom": "8px"},
+            children=[
+                dmc.Text("Rack Units", size="xs", fw=700, c="#344054"),
+                dmc.Group(gap=6, align="center", children=[
+                    html.Div(style={"width": "8px", "height": "8px", "borderRadius": "2px",
+                                    "background": fill, "flexShrink": "0"}),
+                    dmc.Text(f"{occupied} / {total_u}U occupied",
+                             size="xs", c="#667085"),
+                ]),
+            ],
+        ),
+        # Rack cabinet
+        html.Div(
+            className="rack-unit-cabinet",
+            children=[
+                # Left rail
+                html.Div(className="rack-rail rack-rail-left"),
+                # Right rail
+                html.Div(className="rack-rail rack-rail-right"),
+                # Units
+                html.Div(
+                    style={"flex": "1", "display": "flex", "flexDirection": "column",
+                           "padding": "4px 8px"},
+                    children=rows,
+                ),
+            ],
+        ),
+        # Legend
+        dmc.Group(gap="md", mt="xs", children=[
+            *[dmc.Group(gap=4, align="center", children=[
+                html.Div(style={"width": "8px", "height": "8px", "borderRadius": "2px",
+                                "background": v["bg"], "border": f"1px solid {v['border']}"}),
+                dmc.Text(k.title(), size="xs", c="#667085"),
+            ]) for k, v in list(DEVICE_STYLES.items())[:4]],
+        ]),
+    ])
+
+
+def _detail_row(icon, label, value):
+    return html.Div(
+        style={"display": "flex", "alignItems": "center", "gap": "10px",
+               "padding": "10px 14px"},
+        children=[
+            DashIconify(icon=icon, width=15, color="#98A2B3"),
+            dmc.Text(label, size="xs", c="#667085", fw=600,
+                     style={"width": "52px", "flexShrink": "0"}),
+            dmc.Text(value, size="xs", c="#344054", fw=500),
+        ],
+    )
+
+
 @app.callback(
     dash.Output("floor-map-rack-detail", "children"),
     dash.Input("floor-map-graph", "clickData"),
@@ -826,159 +1087,107 @@ def back_to_globe(n_clicks):
     prevent_initial_call=True,
 )
 def show_rack_detail(click_data, dc_store):
-    if not click_data or "points" not in click_data or not click_data["points"]:
+    if not click_data or not click_data.get("points"):
         return dash.no_update
     point = click_data["points"][0]
-    custom = point.get("customdata")
-    if not custom or not custom[0]:
+    cd = point.get("customdata")
+    if not cd:
         return dash.no_update
-    dc_id = custom[0][0] if isinstance(custom[0], list) else custom[0]
-    rack_name = custom[0][1] if isinstance(custom[0], list) else (custom[1] if len(custom) > 1 else "")
-    status = custom[0][2] if isinstance(custom[0], list) else (custom[2] if len(custom) > 2 else "unknown")
-    u_height = custom[0][3] if isinstance(custom[0], list) else (custom[3] if len(custom) > 3 else 42)
-    energy = custom[0][4] if isinstance(custom[0], list) else (custom[4] if len(custom) > 4 else "?")
-    rack_type = custom[0][5] if isinstance(custom[0], list) else (custom[5] if len(custom) > 5 else "")
+    rack_id, name, status, u_height, power, hall, rack_type, serial = (
+        list(cd) + [None] * 8
+    )[:8]
+    # dc_id always comes from the store — never trust Plotly customdata for this
+    dc_id = (dc_store or {}).get("dc_id", "")
 
-    try:
-        u_height = int(u_height)
-    except (ValueError, TypeError):
-        u_height = 42
+    status_meta = {
+        "active":   ("#17B26A", "#ECFDF3", "#027A48", "green"),
+        "planned":  ("#2E90FA", "#EFF8FF", "#175CD3", "blue"),
+        "inactive": ("#F04438", "#FEF3F2", "#B42318", "red"),
+    }
+    fill, bg, dark, badge_color = status_meta.get(
+        status, ("#98A2B3", "#F9FAFB", "#667085", "gray")
+    )
 
-    from src.services import api_client as _api
-    devices_resp = _api.get_rack_devices(dc_id, rack_name)
+    # Fetch devices for rack unit diagram
+    devices_resp = api.get_rack_devices(dc_id or "", name or "")
     devices = devices_resp.get("devices", [])
 
-    status_color = {
-        "active": "#17B26A", "planned": "#2E90FA",
-        "inactive": "#F04438", "unknown": "#98A2B3",
-    }.get((status or "unknown").lower(), "#98A2B3")
+    return html.Div(
+        children=[
+            # ── Status color bar at top
+            html.Div(style={
+                "height": "4px",
+                "background": f"linear-gradient(90deg, {fill}, {fill}88)",
+                "borderRadius": "12px 12px 0 0",
+                "margin": "-16px -16px 16px -16px",
+            }),
 
-    from dash import html as _html
-    import dash_mantine_components as _dmc
-    from dash_iconify import DashIconify as _DI
-
-    unit_slots = []
-    occupied: dict[int, dict] = {}
-    for dev in devices:
-        slot = dev.get("slot_start", 1) or 1
-        occupied[slot] = dev
-
-    for u in range(u_height, 0, -1):
-        dev = occupied.get(u)
-        if dev:
-            spans = max(1, dev.get("u_size", 1) or 1)
-            dev_color = "#EEF4FF"
-            dev_border = "#C7D7FE"
-            label = dev.get("name") or dev.get("type", f"Device @U{u}")
-            unit_slots.append(
-                _html.Div(
-                    style={
-                        "height": f"{spans * 20}px",
-                        "background": dev_color,
-                        "border": f"1px solid {dev_border}",
-                        "borderRadius": "3px",
-                        "marginBottom": "2px",
-                        "display": "flex",
-                        "alignItems": "center",
-                        "padding": "0 6px",
-                        "fontSize": "10px",
-                        "fontWeight": 600,
-                        "color": "#3538CD",
-                        "overflow": "hidden",
-                        "whiteSpace": "nowrap",
-                    },
-                    children=f"U{u} — {label}",
-                )
-            )
-        else:
-            unit_slots.append(
-                _html.Div(
-                    style={
-                        "height": "20px",
-                        "background": "#1E293B",
-                        "border": "1px solid #2D3748",
-                        "borderRadius": "2px",
-                        "marginBottom": "2px",
-                        "display": "flex",
-                        "alignItems": "center",
-                        "padding": "0 6px",
-                        "fontSize": "9px",
-                        "color": "#475569",
-                    },
-                    children=f"U{u}",
-                )
-            )
-
-    return _html.Div([
-        # Status bar
-        _html.Div(
-            style={"height": "4px", "background": status_color, "borderRadius": "4px 4px 0 0"},
-        ),
-        _html.Div(
-            style={"padding": "16px"},
-            children=[
-                # Header
-                _dmc.Group(
-                    gap="sm",
-                    mb="md",
-                    children=[
-                        _dmc.ThemeIcon(
-                            _DI(icon="solar:server-bold-duotone", width=18),
-                            size="lg", radius="md", color="indigo", variant="light",
-                        ),
-                        _html.Div([
-                            _dmc.Text(rack_name or "Rack", fw=700, size="md", c="#1B2559"),
-                            _dmc.Text(f"{dc_id} · {rack_type}", size="xs", c="#A3AED0"),
-                        ]),
-                        _dmc.Badge(
-                            (status or "unknown").title(),
-                            color={"active": "teal", "planned": "blue", "inactive": "red"}.get(
-                                (status or "").lower(), "gray"
+            # ── Rack identity header
+            html.Div(
+                style={"display": "flex", "justifyContent": "space-between",
+                       "alignItems": "flex-start", "marginBottom": "14px"},
+                children=[
+                    html.Div(
+                        style={"display": "flex", "gap": "12px", "alignItems": "center"},
+                        children=[
+                            html.Div(
+                                style={
+                                    "width": "40px", "height": "40px",
+                                    "borderRadius": "10px",
+                                    "background": bg,
+                                    "border": f"1.5px solid {fill}44",
+                                    "display": "flex", "alignItems": "center",
+                                    "justifyContent": "center", "flexShrink": "0",
+                                },
+                                children=[DashIconify(
+                                    icon="solar:server-square-bold-duotone",
+                                    width=22, color=fill,
+                                )],
                             ),
-                            variant="light", size="sm", ml="auto",
-                        ),
-                    ],
-                ),
-                # Quick stats
-                _dmc.SimpleGrid(
-                    cols=2, spacing="xs", mb="md",
+                            html.Div(children=[
+                                dmc.Text(name, fw=700, size="md", c="#101828",
+                                         style={"lineHeight": "1.3"}),
+                                dmc.Text(hall, size="xs", c="#667085", fw=500),
+                            ]),
+                        ],
+                    ),
+                    dmc.Badge(status.title(), color=badge_color,
+                              variant="light", size="sm"),
+                ],
+            ),
+
+            # ── Quick stats row
+            dmc.SimpleGrid(cols=2, spacing="sm", mb="md", children=[
+                html.Div(
+                    style={"background": "#F9FAFB", "border": "1px solid #EAECF0",
+                           "borderRadius": "10px", "padding": "10px 12px"},
                     children=[
-                        _dmc.Paper(
-                            p="xs", radius="md", withBorder=True,
-                            children=[
-                                _dmc.Text("U Height", size="xs", c="#A3AED0"),
-                                _dmc.Text(f"{u_height}U", fw=700, size="lg", c="#1B2559"),
-                            ],
-                        ),
-                        _dmc.Paper(
-                            p="xs", radius="md", withBorder=True,
-                            children=[
-                                _dmc.Text("Power", size="xs", c="#A3AED0"),
-                                _dmc.Text(f"{energy} kW", fw=700, size="lg", c="#1B2559"),
-                            ],
-                        ),
+                        dmc.Group(gap=5, align="center", mb=2, children=[
+                            DashIconify(icon="solar:ruler-bold-duotone",
+                                        width=13, color="#667085"),
+                            dmc.Text("U Height", size="xs", c="#667085", fw=600),
+                        ]),
+                        dmc.Text(f"{u_height}U", fw=800, size="lg", c="#101828"),
                     ],
                 ),
-                # Rack diagram
-                _dmc.Text("Rack Units", size="xs", fw=600, c="#344054", mb="xs"),
-                _html.Div(
-                    className="rack-unit-cabinet",
+                html.Div(
+                    style={"background": "#F9FAFB", "border": "1px solid #EAECF0",
+                           "borderRadius": "10px", "padding": "10px 12px"},
                     children=[
-                        _html.Div(className="rack-rail"),
-                        _html.Div(
-                            style={"flex": 1, "padding": "4px 6px", "overflowY": "auto"},
-                            children=unit_slots,
-                        ),
-                        _html.Div(className="rack-rail rack-rail-right"),
+                        dmc.Group(gap=5, align="center", mb=2, children=[
+                            DashIconify(icon="solar:bolt-circle-bold-duotone",
+                                        width=13, color="#667085"),
+                            dmc.Text("Power", size="xs", c="#667085", fw=600),
+                        ]),
+                        dmc.Text(str(power or "—"), fw=800, size="lg", c="#101828"),
                     ],
                 ),
-                _dmc.Text(
-                    f"{len(devices)} device(s) installed",
-                    size="xs", c="#A3AED0", mt="xs", ta="right",
-                ),
-            ],
-        ),
-    ])
+            ]),
+
+            # ── Rack unit diagram
+            _build_rack_unit_diagram(name, u_height or 47, devices, fill, dark),
+        ],
+    )
 
 
 @app.callback(
@@ -993,6 +1202,8 @@ def reset_global_detail(n_clicks):
     return [], {"lat": 38.0, "lng": 30.0, "zoom": 3}
 
 
+
+
 @app.callback(
     dash.Output("selected-region-store", "data"),
     dash.Input({"type": "region-nav", "region": ALL}, "n_clicks"),
@@ -1000,6 +1211,7 @@ def reset_global_detail(n_clicks):
 )
 def update_region_store(n_clicks_list):
     import time as _time
+    import json
     ctx = dash.callback_context
     if not ctx.triggered:
         return dash.no_update
@@ -1021,6 +1233,8 @@ def update_region_store(n_clicks_list):
     }
 
 
+
+
 @app.callback(
     dash.Output("global-map-graph", "focusRegion"),
     dash.Input("selected-region-store", "data"),
@@ -1032,6 +1246,9 @@ def update_globe_camera(region):
     lat = region.get("lat")
     lng = region.get("lon")
     scale = region.get("scale", 6.0)
+    # Istanbul (scale=40): tight zoom to show all Istanbul DCs
+    # Ankara/Izmir (scale=15): moderate zoom to show the city
+    # International (scale<10): continent-level zoom
     if scale >= 35:
         zoom = 10
     elif scale >= 10:
@@ -1420,4 +1637,4 @@ def update_intel_disk_trend(disk_name, host, time_range, pathname):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, dev_tools_ui=False, port=8050, use_reloader=False)
+    app.run(debug=True, port=8050, use_reloader=False)

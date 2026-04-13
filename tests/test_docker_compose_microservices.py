@@ -53,9 +53,10 @@ def test_docker_compose_defines_mock_profile_app_mock() -> None:
     assert "8051:8050" in text
 
 
-def test_docker_compose_mock_file_single_service() -> None:
+def test_docker_compose_mock_file_has_webui_and_auth_db() -> None:
     text = _mock_compose_text()
     assert "webui-mock:" in text
+    assert "auth-db:" in text
     assert "APP_MODE: mock" in text
     assert "8050:8050" in text
     assert "context: ." in text

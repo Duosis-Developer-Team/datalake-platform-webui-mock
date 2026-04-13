@@ -1,8 +1,27 @@
-# Mock-only UI: single container, no Redis/APIs/DB. http://localhost:8050
+# Mock UI (APP_MODE=mock) + PostgreSQL auth DB. http://localhost:8050
 #   docker compose -f docker-compose.mock.yml up -d --build
-# For the full microservice stack, use docker-compose.yml (profiles microservice / mock).
+# Login: admin / ADMIN_DEFAULT_PASSWORD (default Admin123!) unless AUTH_DISABLED=true.
+#
+# Auth DB host port 5434 avoids clashing with Datalake-Platform-GUI auth-db on 5433.
 
 services:
+  auth-db:
+    image: postgres:15
+    container_name: datalake-webui-mock-auth-db
+    environment:
+      POSTGRES_DB: ${AUTH_DB_NAME:-bulutauth}
+      POSTGRES_USER: ${AUTH_DB_USER:-authadmin}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASS:-change_me_auth}
+    ports:
+      - "5434:5432"
+    volumes:
+      - mock_auth_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-authadmin} -d ${AUTH_DB_NAME:-bulutauth}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   webui-mock:
     build:
       context: .
@@ -14,5 +33,20 @@ services:
     environment:
       APP_BUILD_ID: ${APP_BUILD_ID:-local}
       APP_MODE: mock
-      # Optional per-customer demo label (sidebar + browser tab)
       APP_BRAND_TITLE: ${APP_BRAND_TITLE:-Datalake WebUI}
+      AUTH_DB_HOST: auth-db
+      AUTH_DB_PORT: "5432"
+      AUTH_DB_NAME: ${AUTH_DB_NAME:-bulutauth}
+      AUTH_DB_USER: ${AUTH_DB_USER:-authadmin}
+      AUTH_DB_PASS: ${AUTH_DB_PASS:-change_me_auth}
+      SECRET_KEY: ${SECRET_KEY:-change_me_secret_key}
+      ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-Admin123!}
+      FERNET_KEY: ${FERNET_KEY:-}
+      API_JWT_SECRET: ${API_JWT_SECRET:-}
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
+    depends_on:
+      auth-db:
+        condition: service_healthy
+
+volumes:
+  mock_auth_pgdata:

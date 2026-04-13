@@ -1,4 +1,3 @@
-from __future__ import annotations
 import dash_mantine_components as dmc
 from dash_iconify import DashIconify
 from dash import html
@@ -7,7 +6,43 @@ from src.utils.app_mode import is_mock_mode
 from src.utils.branding import get_brand_title
 
 
-def create_sidebar_nav(active_path):
+# href -> permission code (page:*)
+NAV_ITEM_SPECS: list[tuple[str, str, str, str]] = [
+    ("/", "Overview", "solar:home-smile-bold-duotone", "page:overview"),
+    ("/datacenters", "Data Centers", "solar:server-square-bold-duotone", "page:datacenters"),
+    ("/global-view", "Global View", "solar:global-bold-duotone", "page:global_view"),
+    ("/customer-view", "Customer View", "solar:users-group-rounded-bold-duotone", "page:customer_view"),
+    ("/query-explorer", "Query Explorer", "solar:code-square-bold-duotone", "page:query_explorer"),
+]
+
+SETTINGS_ENTRY_CODES: tuple[str, ...] = (
+    "grp:settings",
+    "page:settings_users",
+    "page:settings_roles",
+    "page:settings_permissions",
+    "page:settings_ldap",
+    "page:settings_teams",
+    "page:settings_auth",
+    "page:settings_audit",
+    "page:settings_integrations",
+    "page:settings_auranotify",
+)
+
+
+def _settings_visible(perm_map: dict | None) -> bool:
+    if not perm_map:
+        return True
+    return any(_perm_allows(perm_map, c) for c in SETTINGS_ENTRY_CODES)
+
+
+def _perm_allows(perm_map: dict | None, code: str) -> bool:
+    if not perm_map:
+        return True
+    entry = perm_map.get(code) or {}
+    return bool(entry.get("view"))
+
+
+def create_sidebar_nav(active_path, perm_map: dict | None = None, username: str | None = None):
     brand_title = get_brand_title()
     brand = html.Div(
         [
@@ -50,91 +85,71 @@ def create_sidebar_nav(active_path):
         },
     )
 
-    mock = is_mock_mode()
+    links: list = []
+    for href, label, icon, pcode in NAV_ITEM_SPECS:
+        if not _perm_allows(perm_map, pcode):
+            continue
+        if href == "/":
+            active = active_path in ("/", "")
+        elif href == "/datacenters":
+            active = active_path.startswith("/datacenter") or active_path == "/datacenters"
+        else:
+            active = active_path == href
+        links.append(
+            dmc.NavLink(
+                label=label,
+                leftSection=DashIconify(icon=icon, width=20),
+                href=href,
+                className="sidebar-link",
+                active=active,
+                variant="subtle",
+                color="indigo",
+                style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
+            )
+        )
 
-    links = [
-        dmc.NavLink(
-            label="Overview",
-            leftSection=DashIconify(icon="solar:home-smile-bold-duotone", width=20),
-            href="/",
-            className="sidebar-link",
-            active=active_path == "/" or active_path == "",
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-        ),
-        dmc.NavLink(
-            label="Data Centers",
-            leftSection=DashIconify(icon="solar:server-square-bold-duotone", width=20),
-            href="/datacenters",
-            className="sidebar-link",
-            active=active_path.startswith("/datacenter") or active_path == "/datacenters",
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-        ),
-        dmc.NavLink(
-            label="Global View",
-            leftSection=DashIconify(icon="solar:global-bold-duotone", width=20),
-            href="/global-view",
-            className="sidebar-link",
-            active=active_path == "/global-view",
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-        ),
-        dmc.NavLink(
-            label="Customer View",
-            leftSection=DashIconify(icon="solar:users-group-rounded-bold-duotone", width=20),
-            href="/customer-view",
-            className="sidebar-link",
-            active=active_path == "/customer-view",
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-        ),
-        dmc.NavLink(
-            label="Query Explorer",
-            leftSection=DashIconify(icon="solar:code-square-bold-duotone", width=20),
-            href="/query-explorer",
-            className="sidebar-link",
-            active=active_path == "/query-explorer",
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-        ),
-        dmc.NavLink(
-            label="Analytics",
-            leftSection=DashIconify(icon="solar:chart-square-bold-duotone", width=20),
-            href="/analytics" if mock else "#",
-            className="sidebar-link",
-            active=(active_path == "/analytics"),
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-            disabled=not mock,
-        ),
-        dmc.NavLink(
-            label="Datalake Assistant",
-            leftSection=DashIconify(icon="solar:chat-round-dots-bold-duotone", width=20),
-            href="/daa" if mock else "#",
-            className="sidebar-link",
-            active=(active_path == "/daa"),
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-            disabled=not mock,
-        ),
-        dmc.NavLink(
-            label="Settings",
-            leftSection=DashIconify(icon="solar:settings-bold-duotone", width=20),
-            href="/settings",
-            className="sidebar-link",
-            active=(active_path.startswith("/settings")),
-            variant="subtle",
-            color="indigo",
-            style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
-        ),
-    ]
+    if _settings_visible(perm_map):
+        settings_active = active_path.startswith("/settings")
+        links.append(
+            dmc.NavLink(
+                label="Settings",
+                leftSection=DashIconify(icon="solar:settings-bold-duotone", width=20),
+                href="/settings",
+                className="sidebar-link",
+                active=settings_active,
+                variant="subtle",
+                color="indigo",
+                style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
+            )
+        )
 
-    return html.Div([brand, search_box, dmc.Stack(links, gap=4)])
+    if is_mock_mode():
+        for href, label, icon in (
+            ("/analytics", "Analytics", "solar:chart-square-bold-duotone"),
+            ("/daa", "DAA", "solar:widget-5-bold-duotone"),
+        ):
+            links.append(
+                dmc.NavLink(
+                    label=label,
+                    leftSection=DashIconify(icon=icon, width=20),
+                    href=href,
+                    className="sidebar-link",
+                    active=active_path == href,
+                    variant="subtle",
+                    color="indigo",
+                    style={"borderRadius": "8px", "fontWeight": "500", "marginBottom": "5px"},
+                )
+            )
+    footer = html.Div(
+        style={"marginTop": "auto", "paddingTop": "16px", "borderTop": "1px solid #E9ECEF"},
+        children=[
+            dmc.Text(username or "Signed in", size="xs", c="dimmed", mb="xs", style={"paddingLeft": "8px"}),
+            html.A(
+                dmc.Button("Sign out", variant="light", color="gray", size="xs", fullWidth=True),
+                href="/auth/logout",
+                style={"textDecoration": "none"},
+            ),
+        ],
+    )
+
+    return html.Div([brand, search_box, dmc.Stack(links, gap=4), footer])
