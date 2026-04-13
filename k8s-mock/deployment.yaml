@@ -14,25 +14,62 @@ spec:
       labels:
         app: datalake-webui-mock
     spec:
+      initContainers:
+        - name: wait-for-auth-db
+          image: postgres:15-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h "$AUTH_DB_HOST" -p "$AUTH_DB_PORT" -U "$AUTH_DB_USER" -d "$AUTH_DB_NAME"; do
+                echo "waiting for auth postgres..."
+                sleep 2
+              done
+          envFrom:
+            - configMapRef:
+                name: datalake-webui-mock-auth-config
       containers:
         - name: webui
           image: datalake-webui-mock:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8050
+          envFrom:
+            - configMapRef:
+                name: datalake-webui-mock-config
+            - configMapRef:
+                name: datalake-webui-mock-auth-config
           env:
             - name: APP_MODE
               value: "mock"
-            - name: APP_BRAND_TITLE
+            - name: AUTH_DB_PASS
               valueFrom:
-                configMapKeyRef:
-                  name: datalake-webui-mock-config
-                  key: APP_BRAND_TITLE
-            - name: APP_BUILD_ID
+                secretKeyRef:
+                  name: datalake-webui-mock-auth-secrets
+                  key: POSTGRES_PASSWORD
+            - name: SECRET_KEY
               valueFrom:
-                configMapKeyRef:
-                  name: datalake-webui-mock-config
-                  key: APP_BUILD_ID
+                secretKeyRef:
+                  name: datalake-webui-mock-auth-secrets
+                  key: SECRET_KEY
+            - name: ADMIN_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: datalake-webui-mock-auth-secrets
+                  key: ADMIN_DEFAULT_PASSWORD
+            - name: FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: datalake-webui-mock-auth-secrets
+                  key: FERNET_KEY
+                  optional: true
+            - name: API_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: datalake-webui-mock-auth-secrets
+                  key: API_JWT_SECRET
+                  optional: true
           resources:
             requests:
               cpu: 100m

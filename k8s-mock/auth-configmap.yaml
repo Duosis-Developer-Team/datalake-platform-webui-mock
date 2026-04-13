@@ -1,0 +1,14 @@
+# Non-secret auth / Postgres identity (same as docker-compose.mock.yml defaults).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: datalake-webui-mock-auth-config
+data:
+  AUTH_DB_HOST: "datalake-webui-mock-auth-db"
+  AUTH_DB_PORT: "5432"
+  AUTH_DB_NAME: "bulutauth"
+  AUTH_DB_USER: "authadmin"
+  POSTGRES_DB: "bulutauth"
+  POSTGRES_USER: "authadmin"
+  # Set to "true" only for local debugging without login (admin row still required in DB after first seed).
+  AUTH_DISABLED: "false"

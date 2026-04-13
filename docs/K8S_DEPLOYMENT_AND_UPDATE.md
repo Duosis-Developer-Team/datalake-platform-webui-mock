@@ -16,6 +16,10 @@ This guide complements [KUBERNETES_SETUP.md](KUBERNETES_SETUP.md) with **authent
 
 The Dash app uses **HTTPX** to call the three APIs. It also connects to a **dedicated PostgreSQL database for auth** (`AUTH_DB_*`), separate from the metrics/inventory DB used by the APIs (`DB_*`).
 
+### 1.1 Mock stack (`k8s-mock/`)
+
+For **`APP_MODE=mock`** demos, Path A runs the same Dash image with **in-cluster PostgreSQL** for auth/RBAC/Settings (StatefulSet `datalake-webui-mock-auth-db`), Secrets, and an initContainer that waits for `pg_isready`. This matches [`docker-compose.mock.yml`](../docker-compose.mock.yml). See [KUBERNETES_SETUP.md §3](KUBERNETES_SETUP.md) for file list and `kubectl apply` order. Rolling the UI: `kubectl set image deployment/datalake-webui-mock webui=<registry>/datalake-webui-mock:<tag>`; auth data persists on the StatefulSet PVC.
+
 ---
 
 ## 2. Architecture (with auth)
@@ -202,7 +206,7 @@ Session cookies (`dl_session` by default) should be sent over **HTTPS** in produ
 
 | Document | Content |
 |----------|---------|
-| [KUBERNETES_SETUP.md](KUBERNETES_SETUP.md) | Full stack vs mock-only, API secrets, apply order, Ingress |
+| [KUBERNETES_SETUP.md](KUBERNETES_SETUP.md) | Full stack vs mock + auth DB (`k8s-mock/`), API secrets, apply order, Ingress |
 | [TOPOLOGY_AND_SETUP.md](TOPOLOGY_AND_SETUP.md) | Topology, env vars, Compose |
 | [AUTH_SYSTEM.md](AUTH_SYSTEM.md) | Auth stack overview and link to full reference |
 | [env.example](../env.example) | Environment variables |

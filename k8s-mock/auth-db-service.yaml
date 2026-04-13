@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: datalake-webui-mock-auth-db
+  labels:
+    app: datalake-webui-mock-auth-db
+spec:
+  type: ClusterIP
+  selector:
+    app: datalake-webui-mock-auth-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

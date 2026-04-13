@@ -1,6 +1,6 @@
 # Kubernetes deployment guide
 
-Step-by-step setup for deploying this repository on Kubernetes using the manifests under [`k8s/`](../k8s/) (full stack) or [`k8s-mock/`](../k8s-mock/) (mock UI only). For architecture, routes, and environment variable semantics, see [TOPOLOGY_AND_SETUP.md](TOPOLOGY_AND_SETUP.md).
+Step-by-step setup for deploying this repository on Kubernetes using the manifests under [`k8s/`](../k8s/) (full stack) or [`k8s-mock/`](../k8s-mock/) (mock UI + in-cluster auth Postgres). For architecture, routes, and environment variable semantics, see [TOPOLOGY_AND_SETUP.md](TOPOLOGY_AND_SETUP.md).
 
 ---
 
@@ -12,7 +12,7 @@ Step-by-step setup for deploying this repository on Kubernetes using the manifes
 | `kubectl` | Configured with a context that can create Deployments, Services, ConfigMaps, Secrets, Ingress. |
 | [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/deploy/) | Example manifests use `ingressClassName: nginx`. Install in your cluster or change the class to match your controller. |
 | Container images | Build and push to a registry your nodes can pull, **or** load images locally (kind, minikube, k3s). |
-| PostgreSQL (full stack only) | Reachable from the cluster (same VPC, VPN, or exposed service). APIs use `DB_*` from ConfigMaps and Secrets. |
+| PostgreSQL | **Path B:** metrics DB external to the cluster (`DB_*`). **Path A:** auth Postgres is defined under [`k8s-mock/`](../k8s-mock/) (StatefulSet); no separate metrics DB. |
 | Metrics Server (optional) | Required if you apply **HorizontalPodAutoscaler** manifests under `k8s/*/hpa.yaml`. |
 
 This repo ships plain YAML (no Helm/Kustomize). You can wrap these files in your own tooling later.
@@ -25,13 +25,27 @@ For **authentication** (auth DB Secret, rolling upgrades, Globe View egress), se
 
 | Path | Directory | Use case |
 |------|-----------|----------|
-| **A — Mock only** | [`k8s-mock/`](../k8s-mock/) | Demo UI with static data (`APP_MODE=mock`). No PostgreSQL, Redis, or microservices. |
+| **A — Mock + auth DB** | [`k8s-mock/`](../k8s-mock/) | Demo UI with static data (`APP_MODE=mock`) plus in-cluster **PostgreSQL** for RBAC / Settings (same model as [`docker-compose.mock.yml`](../docker-compose.mock.yml)). No metrics APIs or Redis. |
 | **B — Full stack** | [`k8s/`](../k8s/) | Dash frontend + three FastAPI services + Redis + Ingress. PostgreSQL is external. |
 | **C — Monitoring (optional)** | [`k8s/monitoring/`](../k8s/monitoring/) | Namespace `bulutistan-monitoring`, Prometheus config, Fluent Bit. Separate from app namespaces. |
 
 ---
 
-## 3. Path A — Mock-only stack (`k8s-mock/`)
+## 3. Path A — Mock stack with auth PostgreSQL (`k8s-mock/`)
+
+Components:
+
+| Manifest | Purpose |
+|----------|---------|
+| [`00-auth-secrets-reference.yaml`](../k8s-mock/00-auth-secrets-reference.yaml) | Secret template: `POSTGRES_PASSWORD` (same value as app `AUTH_DB_PASS`), `SECRET_KEY`, `ADMIN_DEFAULT_PASSWORD`, optional `FERNET_KEY` / `API_JWT_SECRET`. **Replace placeholders** or use `kubectl create secret` (see file header). |
+| [`auth-configmap.yaml`](../k8s-mock/auth-configmap.yaml) | `AUTH_DB_*`, `POSTGRES_*`, `AUTH_DISABLED`. |
+| [`auth-db-service.yaml`](../k8s-mock/auth-db-service.yaml) | ClusterIP service `datalake-webui-mock-auth-db:5432`. |
+| [`auth-db-statefulset.yaml`](../k8s-mock/auth-db-statefulset.yaml) | `postgres:15` with 5Gi PVC (edit `storage` / `storageClassName` if your cluster requires it). |
+| [`configmap.yaml`](../k8s-mock/configmap.yaml) | UI branding (`APP_BRAND_TITLE`, `APP_BUILD_ID`). |
+| [`deployment.yaml`](../k8s-mock/deployment.yaml) | Dash pod: `APP_MODE=mock`, initContainer waits for Postgres, loads secrets for auth bootstrap / seed. |
+| [`service.yaml`](../k8s-mock/service.yaml), [`ingress.yaml`](../k8s-mock/ingress.yaml) | Expose the UI. |
+
+Default login after first seed: **`admin`** / value of **`ADMIN_DEFAULT_PASSWORD`** in the Secret (same default as Compose: `Admin123!` in the reference file — change in production).
 
 ### 3.1 Build the image
 
@@ -54,14 +68,29 @@ Edit [`k8s-mock/configmap.yaml`](../k8s-mock/configmap.yaml):
 - `APP_BRAND_TITLE` — sidebar / tab title
 - `APP_BUILD_ID` — build label shown in the UI
 
-### 3.4 Apply manifests (order)
+### 3.4 Apply manifests
+
+The `00-` prefix ensures a directory-wide apply creates the Secret before the StatefulSet. Prefer:
 
 ```bash
+kubectl apply -f k8s-mock/
+```
+
+Or explicitly:
+
+```bash
+kubectl apply -f k8s-mock/00-auth-secrets-reference.yaml   # edit values first, or use your own Secret name/keys
+kubectl apply -f k8s-mock/auth-configmap.yaml
+kubectl apply -f k8s-mock/auth-db-service.yaml
+kubectl apply -f k8s-mock/auth-db-statefulset.yaml
+kubectl wait --for=condition=ready pod -l app=datalake-webui-mock-auth-db --timeout=120s
 kubectl apply -f k8s-mock/configmap.yaml
 kubectl apply -f k8s-mock/deployment.yaml
 kubectl apply -f k8s-mock/service.yaml
 kubectl apply -f k8s-mock/ingress.yaml
 ```
+
+Wait until the auth-db pod is **Ready** before the webui pod passes its initContainer and starts.
 
 ### 3.5 DNS and access
 
@@ -283,6 +312,9 @@ kubectl logs deployment/bulutistan-datacenter-api
 | Frontend errors loading data | Frontend ConfigMap URLs wrong (§4.5); APIs not ready; network policies blocking pod-to-pod traffic. |
 | Ingress `502` / `504` | Backend Service has no ready endpoints; probes failing; timeout — compare Ingress annotations with [`k8s/ingress.yaml`](../k8s/ingress.yaml). |
 | HPA not scaling | Metrics Server not installed or misconfigured. |
+| Mock webui `Init:CrashLoop` / stuck init | Auth Postgres not ready; wrong `POSTGRES_PASSWORD` vs Secret; initContainer cannot resolve `datalake-webui-mock-auth-db`. |
+| Mock auth-db `Pending` | No default `StorageClass` or insufficient PV — set `spec.volumeClaimTemplates[].spec.storageClassName` in [`auth-db-statefulset.yaml`](../k8s-mock/auth-db-statefulset.yaml). |
+| Login fails after deploy | Secret `ADMIN_DEFAULT_PASSWORD` must match seed; delete PVC and re-apply StatefulSet if you changed password after first init (or run SQL to reset admin). |
 
 ---
 
