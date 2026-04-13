@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: bulutistan-datacenter-api
+  name: datalake-datacenter-api
   labels:
-    app: bulutistan-datacenter-api
+    app: datalake-datacenter-api
 spec:
   selector:
-    app: bulutistan-datacenter-api
+    app: datalake-datacenter-api
   ports:
     - protocol: TCP
       port: 80

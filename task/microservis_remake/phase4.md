@@ -56,7 +56,7 @@ Datalake-Platform-GUI/
 │   │   ├── deployment.yaml        ← 2 replika, 250m/256Mi req, 500m/512Mi lmt
 │   │   ├── hpa.yaml               ← min:2, max:8, CPU targetUtilization: %70
 │   │   ├── service.yaml           ← ClusterIP, port 80 → targetPort 8000
-│   │   ├── configmap.yaml         ← DB_HOST: 10.134.16.6, REDIS_HOST: bulutistan-redis
+│   │   ├── configmap.yaml         ← DB_HOST: 10.134.16.6, REDIS_HOST: datalake-redis
 │   │   └── secret.yaml            ← DB_PASS: REPLACE_WITH_BASE64_ENCODED_PASSWORD
 │   └── redis/
 │       ├── deployment.yaml        ← 1 replika, redis:7-alpine, 256mb maxmemory
@@ -132,13 +132,13 @@ Datalake-Platform-GUI/
 
 | Host / Path | Hedef Service | Port |
 |------------|---------------|------|
-| `bulutistan.local/` | `bulutistan-frontend` | 8050 |
-| `bulutistan.local/api/v1/*` | `bulutistan-data-api` | 8000 |
-| `bulutistan.local/health` | `bulutistan-data-api` | 8000 |
+| `datalake.local/` | `datalake-frontend` | 8050 |
+| `datalake.local/api/v1/*` | `datalake-data-api` | 8000 |
+| `datalake.local/health` | `datalake-data-api` | 8000 |
 
 > [!IMPORTANT]
 > Frontend'in `api_client.py`'si şu anda `API_BASE_URL = http://localhost:8000` kullanıyor.
-> K8s ortamında bu `http://bulutistan-data-api` (ClusterIP service adı) olarak
+> K8s ortamında bu `http://datalake-data-api` (ClusterIP service adı) olarak
 > değiştirilecek. Bu bir ortam değişkenidir ve Frontend ConfigMap'e eklenecek.
 
 ---
@@ -157,22 +157,22 @@ Datalake-Platform-GUI/
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bulutistan-frontend
+  name: datalake-frontend
   labels:
-    app: bulutistan-frontend
+    app: datalake-frontend
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: bulutistan-frontend
+      app: datalake-frontend
   template:
     metadata:
       labels:
-        app: bulutistan-frontend
+        app: datalake-frontend
     spec:
       containers:
-        - name: bulutistan-frontend
-          image: bulutistan-frontend:latest
+        - name: datalake-frontend
+          image: datalake-frontend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8050
@@ -201,11 +201,11 @@ spec:
             - name: API_BASE_URL
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-frontend-config
+                  name: datalake-frontend-config
                   key: API_BASE_URL
           envFrom:
             - configMapRef:
-                name: bulutistan-frontend-config
+                name: datalake-frontend-config
 ```
 
 **Tasarım kararları:**
@@ -220,13 +220,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: bulutistan-frontend
+  name: datalake-frontend
   labels:
-    app: bulutistan-frontend
+    app: datalake-frontend
 spec:
   type: ClusterIP
   selector:
-    app: bulutistan-frontend
+    app: datalake-frontend
   ports:
     - port: 80
       targetPort: 8050
@@ -239,13 +239,13 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: bulutistan-frontend-config
+  name: datalake-frontend-config
 data:
-  API_BASE_URL: "http://bulutistan-data-api"
+  API_BASE_URL: "http://datalake-data-api"
 ```
 
 > [!WARNING]
-> `API_BASE_URL` değeri `http://bulutistan-data-api` olmalıdır — `http://localhost:8000` DEĞİL.
+> `API_BASE_URL` değeri `http://datalake-data-api` olmalıdır — `http://localhost:8000` DEĞİL.
 > Bu K8s Service DNS adıdır. Backend service.yaml'ın `metadata.name` alanıyla BİREBİR eşleşir.
 
 ##### [YENİ] `k8s/frontend/hpa.yaml`
@@ -254,12 +254,12 @@ data:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: bulutistan-frontend
+  name: datalake-frontend
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: bulutistan-frontend
+    name: datalake-frontend
   minReplicas: 2
   maxReplicas: 6
   metrics:
@@ -279,7 +279,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: bulutistan-ingress
+  name: datalake-ingress
   annotations:
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
@@ -287,35 +287,35 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: bulutistan.local
+    - host: datalake.local
       http:
         paths:
           - path: /api
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-data-api
+                name: datalake-data-api
                 port:
                   number: 80
           - path: /health
             pathType: Exact
             backend:
               service:
-                name: bulutistan-data-api
+                name: datalake-data-api
                 port:
                   number: 80
           - path: /ready
             pathType: Exact
             backend:
               service:
-                name: bulutistan-data-api
+                name: datalake-data-api
                 port:
                   number: 80
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-frontend
+                name: datalake-frontend
                 port:
                   number: 80
 ```
@@ -345,12 +345,12 @@ probe'u backend hazır olmadan PASSED verebilir. 25 saniye bu marjı güvenli ka
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: bulutistan-data-api
+  name: datalake-data-api
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: bulutistan-data-api
+    name: datalake-data-api
   minReplicas: 2
   maxReplicas: 8
   metrics:
@@ -374,8 +374,8 @@ spec:
 - [ ] `kubectl apply -f k8s/backend/` → Backend 2 pod RUNNING, readiness 25s sonra PASSED
 - [ ] `kubectl apply -f k8s/frontend/` → Frontend 2 pod RUNNING
 - [ ] `kubectl apply -f k8s/ingress.yaml` → Ingress oluşturuldu
-- [ ] `curl http://bulutistan.local/api/v1/health` → `{"status": "ok", "redis": "connected"}`
-- [ ] `curl http://bulutistan.local/` → HTML 200 (Dash sayfası)
+- [ ] `curl http://datalake.local/api/v1/health` → `{"status": "ok", "redis": "connected"}`
+- [ ] `curl http://datalake.local/` → HTML 200 (Dash sayfası)
 - [ ] `kubectl get hpa` → Backend (min:2 max:8) ve Frontend (min:2 max:6) listeleniyor
 
 ---
@@ -429,7 +429,7 @@ Pipeline şu iş parçalarından (jobs) oluşacak:
 **Job 2: `test`** (depends_on: lint)
 - Python 3.11 runner
 - **Services:** PostgreSQL 15 + Redis 7 (GitHub Actions service containers)
-- PostgreSQL: `bulutlake` DB, `datalakeui` user, otomatik port
+- PostgreSQL: `datalake` DB, `datalakeui` user, otomatik port
 - Redis: standart port 6379
 - `pip install -r backend/requirements.txt`
 - `pip install pytest pytest-cov`
@@ -439,8 +439,8 @@ Pipeline şu iş parçalarından (jobs) oluşacak:
 
 **Job 3: `build`** (depends_on: test, only on `main` branch)
 - Docker Buildx setup
-- Backend image: `docker build -t $REGISTRY/bulutistan-data-api:$SHA -f backend/Dockerfile ./backend`
-- Frontend image: `docker build -t $REGISTRY/bulutistan-frontend:$SHA -f Dockerfile .`
+- Backend image: `docker build -t $REGISTRY/datalake-data-api:$SHA -f backend/Dockerfile ./backend`
+- Frontend image: `docker build -t $REGISTRY/datalake-frontend:$SHA -f Dockerfile .`
 - Tag: Git SHA + `latest`
 - Push: Container registry'ye (GitHub Container Registry veya özel registry)
 
@@ -454,12 +454,12 @@ Pipeline şu iş parçalarından (jobs) oluşacak:
 |----------|-------|--------|
 | `DB_HOST` | `localhost` (service container) | Pipeline env |
 | `DB_PORT` | `5432` | Pipeline env |
-| `DB_NAME` | `bulutlake` | Pipeline env |
+| `DB_NAME` | `datalake` | Pipeline env |
 | `DB_USER` | `datalakeui` | Pipeline env |
 | `DB_PASS` | `test_password` | Pipeline env |
 | `REDIS_HOST` | `localhost` | Pipeline env |
 | `REDIS_PORT` | `6379` | Pipeline env |
-| `REGISTRY` | `ghcr.io/bulutistan` | GitHub Secrets |
+| `REGISTRY` | `ghcr.io/datalake` | GitHub Secrets |
 
 #### B.5 — Rota B Doğrulama
 
@@ -526,14 +526,14 @@ loadtest/
 Test sırasında paralel terminalden şu komutlar çalıştırılacak:
 
 ```
-Terminal 1: locust -f loadtest/locustfile.py --host=http://bulutistan.local --headless
+Terminal 1: locust -f loadtest/locustfile.py --host=http://datalake.local --headless
             --users 200 --spawn-rate 10 --run-time 9m
             --csv=loadtest/reports/report --html=loadtest/reports/report.html
 
 Terminal 2: kubectl get hpa -w
             (Anlık HPA durumu — pod sayısı artışını izle)
 
-Terminal 3: kubectl top pods -l app=bulutistan-data-api --containers
+Terminal 3: kubectl top pods -l app=datalake-data-api --containers
             (CPU/RAM kullanımını izle)
 ```
 
@@ -545,7 +545,7 @@ Terminal 3: kubectl top pods -l app=bulutistan-data-api --containers
 #### C.5 — Cold-Start Test Senaryosu
 
 Ayrı bir senaryo olarak:
-1. Tüm backend pod'larını sıfırla: `kubectl rollout restart deployment bulutistan-data-api`
+1. Tüm backend pod'larını sıfırla: `kubectl rollout restart deployment datalake-data-api`
 2. Hemen ardından Locust başlat (5 kullanıcı)
 3. İlk 20 saniye TIMEOUT veya yüksek latency beklenir (warm_cache süreci)
 4. 20. saniyeden sonra yanıt süreleri normalleşmeli (<500ms)
@@ -605,7 +605,7 @@ anlık izleyebilmek için structured logging ve metrik toplama altyapısı kurma
 
 ##### [YENİ] `k8s/monitoring/namespace.yaml`
 
-Monitoring stack'i `bulutistan-monitoring` namespace'inde çalışacak.
+Monitoring stack'i `datalake-monitoring` namespace'inde çalışacak.
 
 ##### [YENİ] `k8s/monitoring/fluent-bit-configmap.yaml`
 
@@ -613,7 +613,7 @@ Fluent Bit konfigürasyonu:
 - Input: Kubernetes container logları (tail)
 - Parser: Regex ile timestamp, level, module, message ayrıştırma
 - Output: Loki'ye HTTP push (veya stdout → Grafana Cloud)
-- Filter: `app=bulutistan-*` label'ına sahip pod'lardan log toplama
+- Filter: `app=datalake-*` label'ına sahip pod'lardan log toplama
 
 ##### [YENİ] `k8s/monitoring/fluent-bit-daemonset.yaml`
 
@@ -649,7 +649,7 @@ Prometheus scrape konfigürasyonu:
 
 #### D.6 — Rota D Doğrulama
 
-- [ ] Fluent Bit DaemonSet çalışıyor: `kubectl get ds -n bulutistan-monitoring`
+- [ ] Fluent Bit DaemonSet çalışıyor: `kubectl get ds -n datalake-monitoring`
 - [ ] Backend logları toplanıyor: Grafana'da son 5 dakikanın logları görünüyor
 - [ ] Prometheus metrikleri: `kubectl port-forward svc/prometheus 9090:9090` → targets UP
 - [ ] Grafana dashboard'lar: System Overview, API Performance, Cache & DB

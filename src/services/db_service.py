@@ -110,7 +110,7 @@ class DatabaseService:
     def __init__(self):
         self._db_host = (os.getenv("DB_HOST") or "").strip()
         self._db_port = (os.getenv("DB_PORT") or "5000").strip()
-        self._db_name = (os.getenv("DB_NAME") or "bulutlake").strip()
+        self._db_name = (os.getenv("DB_NAME") or "datalake").strip()
         self._db_user = (os.getenv("DB_USER") or "datalakeui").strip()
         self._db_pass = os.getenv("DB_PASS")
         self._pool: pg_pool.ThreadedConnectionPool | None = None

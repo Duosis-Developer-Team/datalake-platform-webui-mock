@@ -33,7 +33,7 @@
 ## ✅ TASK 1: Marka İkonu Değişimi
 
 ### Amaç
-Sidebar'ın en üstündeki "BULUTİSTAN" logosunun yanındaki jenerik kare ikon (`solar:widget-5-bold-duotone`) kaldırılacak ve yerini bir **Bulut (Cloud) ikonu** alacak. Şirketin adı "Bulutistan" olduğu için tematik uyum sağlanacak.
+Sidebar'ın en üstündeki "DATALAKE" logosunun yanındaki jenerik kare ikon (`solar:widget-5-bold-duotone`) kaldırılacak ve yerini bir **Bulut (Cloud) ikonu** alacak. Şirketin adı "Datalake" olduğu için tematik uyum sağlanacak.
 
 ### Hedef Dosya
 `src/components/sidebar.py` — **Satır 10**
@@ -63,7 +63,7 @@ DashIconify(icon="mdi:cloud", width=32, color="#4318FF"),
 - Alternatif ikon tercihleri (Senior Dev ihtiyaç duyarsa): `mdi:cloud-outline`, `ic:round-cloud`, `fluent:cloud-24-filled`. Ama birincil tercih **`mdi:cloud`** olsun çünkü dolgulu (filled) ve tok bir görünüm veriyor.
 
 ### Kabul Kriterleri
-- [x] Sidebar üstünde "BULUTİSTAN" yazısının solunda **bulut ikonu** görünüyor.
+- [x] Sidebar üstünde "DATALAKE" yazısının solunda **bulut ikonu** görünüyor.
 - [x] İkon rengi `#4318FF` (marka moru).
 - [x] İkon boyutu yanındaki metinle orantılı ve hizalı (dikey orta hiza korunuyor — bu zaten mevcut `alignItems: "center"` style'ı ile sağlanıyor, Satır 16).
 - [x] Eski kare ikon (`solar:widget-5-bold-duotone`) artık görünmüyor.
@@ -279,7 +279,7 @@ Senior Dev, 3 task bittiğinde aşağıdaki kontrolleri yapmalıdır:
 |---|---------|----------------|
 | 1 | `python app.py` ile uygulamayı başlat | Hatasız başlamalı |
 | 2 | `http://localhost:8050` aç | Dashboard yüklenmeli |
-| 3 | Sidebar'da logo kontrolü | Bulut ikonu + "BULUTİSTAN" yazısı görünmeli |
+| 3 | Sidebar'da logo kontrolü | Bulut ikonu + "DATALAKE" yazısı görünmeli |
 | 4 | Sidebar gölge kontrolü | Sağ kenarda yumuşak gölge, floating hissiyatı |
 | 5 | Report period kontrol | Yuvarlatılmış kart içinde, boşluklar düzgün |
 | 6 | SegmentedControl tıklama | 1d / 7d / 30d / Custom hâlâ çalışıyor |
@@ -898,7 +898,7 @@ def create_sidebar_nav(active_path):
         [
             DashIconify(icon="mdi:cloud", width=32, color="#4318FF"),
             html.Span(
-                "BULUTİSTAN",
+                "DATALAKE",
                 style={"fontSize": "24px", "fontWeight": "700", "color": "#2B3674", "marginLeft": "10px"},
             ),
         ],
@@ -2021,7 +2021,7 @@ popoverProps={
 | `radius` | `"md"` | `"xl"` | Daha belirgin köşe yuvarlama (≈16px) |
 | `shadow` prop | `"xl"` | **kaldırıldı** | `boxShadow` styles'a taşındı — özelleştirilebilir |
 | `border` | `rgba(0,0,0,0.05)` | `rgba(67,24,255,0.08)` | Marka morunda çok soluk kenarlık |
-| `boxShadow` | *(styles'ta yoktu)* | Aura gölgesi | `rgba(67,24,255,0.12)` = Bulutistan mor aura |
+| `boxShadow` | *(styles'ta yoktu)* | Aura gölgesi | `rgba(67,24,255,0.12)` = Datalake mor aura |
 | `borderRadius` | *(styles'ta yoktu)* | `"16px"` | `radius:"xl"` ile koordineli — styles API override |
 
 #### Dikkat Noktaları

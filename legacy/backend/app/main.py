@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Bulutistan Datalake API",
+    title="Datalake API",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",

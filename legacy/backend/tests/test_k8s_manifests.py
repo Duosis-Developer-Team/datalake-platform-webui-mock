@@ -45,7 +45,7 @@ def test_deployment_replicas_is_two(deployment):
 
 def test_deployment_image(deployment):
     container = deployment["spec"]["template"]["spec"]["containers"][0]
-    assert container["image"] == "bulutistan-data-api:latest"
+    assert container["image"] == "datalake-data-api:latest"
 
 
 def test_deployment_exposes_port_8000(deployment):

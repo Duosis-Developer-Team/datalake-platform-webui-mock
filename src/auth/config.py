@@ -10,7 +10,7 @@ load_dotenv()
 
 AUTH_DB_HOST = os.environ.get("AUTH_DB_HOST", "localhost")
 AUTH_DB_PORT = int(os.environ.get("AUTH_DB_PORT", "5433"))
-AUTH_DB_NAME = os.environ.get("AUTH_DB_NAME", "bulutauth")
+AUTH_DB_NAME = os.environ.get("AUTH_DB_NAME", "datalake_auth")
 AUTH_DB_USER = os.environ.get("AUTH_DB_USER", "authadmin")
 AUTH_DB_PASS = os.environ.get("AUTH_DB_PASS", "change_me_auth")
 

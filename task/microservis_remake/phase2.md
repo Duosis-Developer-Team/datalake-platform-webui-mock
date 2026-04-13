@@ -305,7 +305,7 @@ HTTP İstek (+ preset/start/end)
   ```yaml
   redis:
     image: redis:7-alpine
-    container_name: bulutistan-redis
+    container_name: datalake-redis
     ports:
       - "6379:6379"
     volumes:
@@ -777,7 +777,7 @@ Bu 3 static metot `db_service.py`'de tanımlı ve exception handling + ROLLBACK 
 - [ ] `cd backend && pytest tests/ --cov=app --cov-report=term-missing` → coverage ≥ %85
 - [ ] `grep -rn "^#" backend/tests/ --include="*.py" | grep -v "TODO\|FIXME"` → SIFIR
 - [ ] `docker compose --profile microservice up -d` → backend + redis + db başarılı
-- [ ] `docker logs bulutistan-backend-api | grep -i error` → SIFIR hata
+- [ ] `docker logs datalake-backend-api | grep -i error` → SIFIR hata
 
 ---
 

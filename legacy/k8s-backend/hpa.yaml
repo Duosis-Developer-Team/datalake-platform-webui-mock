@@ -1,12 +1,12 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: bulutistan-data-api
+  name: datalake-data-api
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: bulutistan-data-api
+    name: datalake-data-api
   minReplicas: 2
   maxReplicas: 8
   metrics:

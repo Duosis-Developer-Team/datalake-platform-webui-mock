@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bulutistan-datacenter-api
+  name: datalake-datacenter-api
   labels:
-    app: bulutistan-datacenter-api
+    app: datalake-datacenter-api
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: bulutistan-datacenter-api
+      app: datalake-datacenter-api
   template:
     metadata:
       labels:
-        app: bulutistan-datacenter-api
+        app: datalake-datacenter-api
     spec:
       containers:
-        - name: bulutistan-datacenter-api
-          image: bulutistan-datacenter-api:latest
+        - name: datalake-datacenter-api
+          image: datalake-datacenter-api:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -43,35 +43,35 @@ spec:
             - name: DB_HOST
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-datacenter-api-config
+                  name: datalake-datacenter-api-config
                   key: DB_HOST
             - name: DB_PORT
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-datacenter-api-config
+                  name: datalake-datacenter-api-config
                   key: DB_PORT
             - name: DB_NAME
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-datacenter-api-config
+                  name: datalake-datacenter-api-config
                   key: DB_NAME
             - name: DB_USER
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-datacenter-api-config
+                  name: datalake-datacenter-api-config
                   key: DB_USER
             - name: REDIS_HOST
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-datacenter-api-config
+                  name: datalake-datacenter-api-config
                   key: REDIS_HOST
             - name: REDIS_PORT
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-datacenter-api-config
+                  name: datalake-datacenter-api-config
                   key: REDIS_PORT
             - name: DB_PASS
               valueFrom:
                 secretKeyRef:
-                  name: bulutistan-datacenter-api-secret
+                  name: datalake-datacenter-api-secret
                   key: DB_PASS

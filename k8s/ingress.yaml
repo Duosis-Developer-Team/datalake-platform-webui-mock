@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: bulutistan-ingress
+  name: datalake-ingress
   annotations:
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
@@ -9,62 +9,62 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: bulutistan.local
+    - host: datalake.local
       http:
         paths:
           - path: /api/v1/sla
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /api/v1/physical-inventory
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /api/v1/datacenters
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /api/v1/dashboard
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /api/v1/customers
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-customer-api
+                name: datalake-customer-api
                 port:
                   number: 80
           - path: /api/v1/queries
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-query-api
+                name: datalake-query-api
                 port:
                   number: 80
           - path: /health
             pathType: Exact
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-frontend
+                name: datalake-frontend
                 port:
                   number: 80

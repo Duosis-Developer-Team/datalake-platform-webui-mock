@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: bulutistan-customer-api
+  name: datalake-customer-api
   labels:
-    app: bulutistan-customer-api
+    app: datalake-customer-api
 spec:
   selector:
-    app: bulutistan-customer-api
+    app: datalake-customer-api
   ports:
     - protocol: TCP
       port: 80

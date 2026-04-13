@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bulutistan-customer-api
+  name: datalake-customer-api
   labels:
-    app: bulutistan-customer-api
+    app: datalake-customer-api
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: bulutistan-customer-api
+      app: datalake-customer-api
   template:
     metadata:
       labels:
-        app: bulutistan-customer-api
+        app: datalake-customer-api
     spec:
       containers:
-        - name: bulutistan-customer-api
-          image: bulutistan-customer-api:latest
+        - name: datalake-customer-api
+          image: datalake-customer-api:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -43,35 +43,35 @@ spec:
             - name: DB_HOST
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-customer-api-config
+                  name: datalake-customer-api-config
                   key: DB_HOST
             - name: DB_PORT
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-customer-api-config
+                  name: datalake-customer-api-config
                   key: DB_PORT
             - name: DB_NAME
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-customer-api-config
+                  name: datalake-customer-api-config
                   key: DB_NAME
             - name: DB_USER
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-customer-api-config
+                  name: datalake-customer-api-config
                   key: DB_USER
             - name: REDIS_HOST
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-customer-api-config
+                  name: datalake-customer-api-config
                   key: REDIS_HOST
             - name: REDIS_PORT
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-customer-api-config
+                  name: datalake-customer-api-config
                   key: REDIS_PORT
             - name: DB_PASS
               valueFrom:
                 secretKeyRef:
-                  name: bulutistan-customer-api-secret
+                  name: datalake-customer-api-secret
                   key: DB_PASS

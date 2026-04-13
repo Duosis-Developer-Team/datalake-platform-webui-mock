@@ -15,7 +15,7 @@
 > 1. **SIFIR YORUM SATIRI KURALI:** Tüm yeni servis kodlarında, Dockerfile'larda, K8s
 >    manifest'lerinde ve test dosyalarında tek bir `#` satırı dahi barındırılmayacak.
 >
-> 2. **VERİ BÜTÜNLÜĞÜ:** Veritabanı parçalanması sırasında mevcut `bulutlake` DB'sindeki
+> 2. **VERİ BÜTÜNLÜĞÜ:** Veritabanı parçalanması sırasında mevcut `datalake` DB'sindeki
 >    HİÇBİR tablo silinmeyecek veya şeması değiştirilmeyecek. Yeni servisler mevcut
 >    tablolara READ-ONLY erişim sağlayacak.
 >
@@ -121,7 +121,7 @@ backend/app/
 
 ### A.3 — Veritabanı Tablo-Domain Eşleştirmesi
 
-Mevcut `bulutlake` veritabanındaki tablolar ve hangi domain'e ait oldukları:
+Mevcut `datalake` veritabanındaki tablolar ve hangi domain'e ait oldukları:
 
 | Tablo Grubu | Tablolar | Erişen Adapter | Domain |
 |------------|---------|---------------|--------|
@@ -174,7 +174,7 @@ Mevcut `bulutlake` veritabanındaki tablolar ve hangi domain'e ait oldukları:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                     Bulutistan Mikroservis Ekosistemi                 │
+│                     Datalake Mikroservis Ekosistemi                 │
 │                                                                       │
 │  ┌───────────────────────────┐    ┌──────────────────────────────┐   │
 │  │  INFRASTRUCTURE SERVICE   │    │     CUSTOMER SERVICE          │   │
@@ -204,7 +204,7 @@ Mevcut `bulutlake` veritabanındaki tablolar ve hangi domain'e ait oldukları:
 │                                                                       │
 │  ┌───────────────────────────┐    ┌──────────────────────────────┐   │
 │  │   QUERY SERVICE            │    │     SHARED LIBRARIES          │   │
-│  │   (query-api)              │    │     (bulutistan-common)       │   │
+│  │   (query-api)              │    │     (datalake-common)       │   │
 │  │   ──────────────────────  │    │     ──────────────────────── │   │
 │  │   Router:                  │    │     time_range.py             │   │
 │  │    GET /queries/{key}      │    │     time_filter.py            │   │
@@ -232,7 +232,7 @@ Mevcut `bulutlake` veritabanındaki tablolar ve hangi domain'e ait oldukları:
 | **datacenter-api** | DC listeleme, detay, dashboard, platform metrikleri, enerji | `datacenters.py`, `dashboard.py` routers, nutanix/vmware/ibm/energy adapters, `aggregate_dc`, `rebuild_summary`, scheduler | ✅ Evet | HPA CPU/Memory |
 | **customer-api** | Müşteri listesi, müşteri kaynakları (16 sorgu pipeline) | `customers.py` router, `customer_adapter.py` | ✅ Evet | HPA CPU |
 | **query-api** | Ad-hoc sorgu çalıştırma, SQL override CRUD | `queries.py` router, `query_overrides.py`, `registry.py` | ✅ Evet | Sabit 1-2 pod |
-| **bulutistan-common** | Paylaşılan kütüphane (pip paketi veya git submodule) | `time_range.py`, `time_filter.py`, `cache_backend.py`, `redis_client.py`, `cache_service.py` | N/A (kütüphane) | N/A |
+| **datalake-common** | Paylaşılan kütüphane (pip paketi veya git submodule) | `time_range.py`, `time_filter.py`, `cache_backend.py`, `redis_client.py`, `cache_service.py` | N/A (kütüphane) | N/A |
 
 ### B.3 — Domain'e Göre Endpoint Dağılımı
 
@@ -265,7 +265,7 @@ Mevcut `bulutlake` veritabanındaki tablolar ve hangi domain'e ait oldukları:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    PostgreSQL: bulutlake                      │
+│                    PostgreSQL: datalake                      │
 │                                                               │
 │  ┌──────────────────────┐  ┌──────────────────────────────┐  │
 │  │    Schema: infra       │  │      Schema: customer         │  │
@@ -358,7 +358,7 @@ Datalake-Platform-GUI/
 │   │   │   │   ├── ibm.py
 │   │   │   │   ├── energy.py
 │   │   │   │   └── loki.py
-│   │   │   ├── core/                  ← bulutistan-common'dan
+│   │   │   ├── core/                  ← datalake-common'dan
 │   │   │   │   ├── redis_client.py
 │   │   │   │   ├── cache_backend.py
 │   │   │   │   └── time_filter.py
@@ -379,7 +379,7 @@ Datalake-Platform-GUI/
 │   │   │   │   ├── customer_service.py
 │   │   │   │   └── cache_service.py
 │   │   │   ├── db/queries/customer.py
-│   │   │   ├── core/                  ← bulutistan-common'dan
+│   │   │   ├── core/                  ← datalake-common'dan
 │   │   │   │   ├── redis_client.py
 │   │   │   │   ├── cache_backend.py
 │   │   │   │   └── time_filter.py
@@ -420,7 +420,7 @@ Datalake-Platform-GUI/
 - Küçük proje (<5 servis) için ideal
 
 **Seçenek B (Gelecek):** Git Subtree veya Private PyPI Paketi
-- `bulutistan-common` adlı paylaşılan kütüphane
+- `datalake-common` adlı paylaşılan kütüphane
 - 10+ servis olduğunda mantıklı — şu an aşırı mühendislik (over-engineering)
 
 **KARAR:** Her servis ortak kodun kendi kopyasını tutar. Gelecekte büyüme olursa
@@ -463,7 +463,7 @@ Mevcut `DatabaseService` sınıfı (471 satır, 26 metot) üç parçaya ayrılac
          └───────────┬───────────────┘
                      ▼
               ┌──────────────┐
-              │  bulutlake   │
+              │  datalake   │
               │  PostgreSQL  │
               └──────────────┘
 ```
@@ -491,7 +491,7 @@ over-engineering. NGINX Ingress zaten bunu ücretsiz sağlıyor.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: bulutistan-ingress
+  name: datalake-ingress
   annotations:
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
@@ -499,49 +499,49 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: bulutistan.local
+    - host: datalake.local
       http:
         paths:
           - path: /api/v1/datacenters
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /api/v1/dashboard
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /api/v1/customers
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-customer-api
+                name: datalake-customer-api
                 port:
                   number: 80
           - path: /api/v1/queries
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-query-api
+                name: datalake-query-api
                 port:
                   number: 80
           - path: /health
             pathType: Exact
             backend:
               service:
-                name: bulutistan-datacenter-api
+                name: datalake-datacenter-api
                 port:
                   number: 80
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: bulutistan-frontend
+                name: datalake-frontend
                 port:
                   number: 80
 ```
@@ -594,7 +594,7 @@ Frontend'in `api_client.py` dosyası **HİÇBİR DEĞİŞİKLİK GEREKTİRMEZ** 
 - [ ] K8s manifestoları: `k8s/datacenter-api/deployment.yaml`, `service.yaml`, `configmap.yaml`, `hpa.yaml`
 
 **Doğrulama:**
-- [ ] `docker build -t bulutistan-datacenter-api services/datacenter-api/` → başarılı
+- [ ] `docker build -t datalake-datacenter-api services/datacenter-api/` → başarılı
 - [ ] Container'ı çalıştır, `curl /api/v1/datacenters/summary?preset=7d` → JSON response
 - [ ] `curl /api/v1/dashboard/overview?preset=7d` → dashboard JSON
 - [ ] `curl /health` → `{"status": "ok"}`
@@ -617,10 +617,10 @@ Frontend'in `api_client.py` dosyası **HİÇBİR DEĞİŞİKLİK GEREKTİRMEZ** 
 - [ ] K8s manifestoları oluştur
 
 **Doğrulama:**
-- [ ] `docker build -t bulutistan-customer-api services/customer-api/` → başarılı
+- [ ] `docker build -t datalake-customer-api services/customer-api/` → başarılı
 - [ ] `curl /api/v1/customers` → `["Boyner"]`
 - [ ] `curl /api/v1/customers/Boyner/resources?preset=7d` → resource JSON
-- [ ] `docker build -t bulutistan-query-api services/query-api/` → başarılı
+- [ ] `docker build -t datalake-query-api services/query-api/` → başarılı
 - [ ] `curl /api/v1/queries/nutanix_host_count?params=DC11` → sonuç
 
 ### ADIM 4: Ingress Güncelleme, Integration Test ve Cutover
@@ -678,7 +678,7 @@ Frontend'in `api_client.py` dosyası **HİÇBİR DEĞİŞİKLİK GEREKTİRMEZ** 
                 ▼    ▼                 ▼                   ▼
        ┌──────────────┐      ┌──────────────┐     ┌──────────────┐
        │   Redis       │      │  PostgreSQL   │     │  PostgreSQL  │
-       │  (Paylaşılan) │      │   bulutlake   │     │  bulutlake   │
+       │  (Paylaşılan) │      │   datalake   │     │  datalake   │
        │   ClusterIP   │      │ ──────────── │     │ (aynı DB)    │
        └──────────────┘      │ Schema: infra │     └──────────────┘
                               │ Schema:customer│

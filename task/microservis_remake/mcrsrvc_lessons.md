@@ -1,4 +1,4 @@
-# Bulutistan Dashboard — Mikro Servis Dönüşümü: Öğretiler (Lessons Learned)
+# Datalake Dashboard — Mikro Servis Dönüşümü: Öğretiler (Lessons Learned)
 
 > Bu dosya, mevcut kod tabanından çıkarılan kritik öğretileri ve yeni yapıya aktarılırken
 > KESİNLİKLE korunması gereken davranışları belgeler.

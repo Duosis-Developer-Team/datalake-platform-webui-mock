@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: bulutistan-data-api
+  name: datalake-data-api
   labels:
-    app: bulutistan-data-api
+    app: datalake-data-api
 spec:
   type: ClusterIP
   selector:
-    app: bulutistan-data-api
+    app: datalake-data-api
   ports:
     - port: 80
       targetPort: 8000

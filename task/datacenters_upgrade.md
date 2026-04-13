@@ -691,7 +691,7 @@ remaining   = max(0.0, 100.0 - power_ratio)
 ```python
 sections=[
     {"value": power_ratio, "color": "orange"},  # IBM Power yüzdesi — turuncu
-    {"value": remaining,   "color": "#4318FF"},  # Geri kalan — Bulutistan moru
+    {"value": remaining,   "color": "#4318FF"},  # Geri kalan — Datalake moru
 ]
 ```
 `dmc.RingProgress` sections toplamı 100'ü geçerse hatalı görünüm. `max(0.0, ...)` guard yeterli.

@@ -110,7 +110,7 @@ class DatabaseService:
     def __init__(self):
         self._db_host = os.getenv("DB_HOST", "10.134.16.6")
         self._db_port = os.getenv("DB_PORT", "5000")   # Non-standard port — not 5432
-        self._db_name = os.getenv("DB_NAME", "bulutlake")
+        self._db_name = os.getenv("DB_NAME", "datalake")
         self._db_user = os.getenv("DB_USER", "datalakeui")
         self._db_pass = os.getenv("DB_PASS")
         self._pool: pg_pool.ThreadedConnectionPool | None = None

@@ -77,7 +77,7 @@ Used by services and typically loaded from `.env` (see [`env.example`](../env.ex
 |----------|-------------|
 | `DB_HOST` | Database host |
 | `DB_PORT` | Database port |
-| `DB_NAME` | Database name (e.g. `bulutlake`) |
+| `DB_NAME` | Database name (e.g. `datalake`) |
 | `DB_USER` | Database user |
 | `DB_PASS` | Database password |
 
@@ -226,14 +226,14 @@ The **`app`** service sets **`DATACENTER_API_URL`**, **`CUSTOMER_API_URL`**, and
 
 For a **step-by-step** install (images, Secrets, ConfigMaps, apply order, verification), see **[KUBERNETES_SETUP.md](KUBERNETES_SETUP.md)**.
 
-[`k8s/ingress.yaml`](../k8s/ingress.yaml) (example host `bulutistan.local`) routes:
+[`k8s/ingress.yaml`](../k8s/ingress.yaml) (example host `datalake.local`) routes:
 
 | Path prefix | Backend Service (example name) |
 |-------------|--------------------------------|
-| `/api/v1/sla`, `/api/v1/physical-inventory`, `/api/v1/datacenters`, `/api/v1/dashboard`, `/health` | `bulutistan-datacenter-api` |
-| `/api/v1/customers` | `bulutistan-customer-api` |
-| `/api/v1/queries` | `bulutistan-query-api` |
-| `/` | `bulutistan-frontend` |
+| `/api/v1/sla`, `/api/v1/physical-inventory`, `/api/v1/datacenters`, `/api/v1/dashboard`, `/health` | `datalake-datacenter-api` |
+| `/api/v1/customers` | `datalake-customer-api` |
+| `/api/v1/queries` | `datalake-query-api` |
+| `/` | `datalake-frontend` |
 
 Adjust hostnames and service names to match your cluster. Do not store secrets in this file.
 

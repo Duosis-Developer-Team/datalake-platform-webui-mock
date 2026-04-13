@@ -1,4 +1,4 @@
-# Bulutistan Dashboard — Mikro Servis Dönüşümü: Test Stratejisi
+# Datalake Dashboard — Mikro Servis Dönüşümü: Test Stratejisi
 
 > Bu dosya, yeni FastAPI mikro servislerin, Docker build sürecinin ve K8s manifest'lerinin
 > nasıl test edileceğini tanımlar.

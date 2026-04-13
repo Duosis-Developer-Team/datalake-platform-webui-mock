@@ -27,10 +27,10 @@ For **`APP_MODE=mock`** demos, Path A runs the same Dash image with **in-cluster
 ```mermaid
 flowchart LR
   subgraph ingress [Ingress]
-    ING[bulutistan-ingress]
+    ING[datalake-ingress]
   end
   subgraph fe [Frontend]
-    FE[bulutistan-frontend]
+    FE[datalake-frontend]
   end
   subgraph apis [APIs]
     DC[datacenter-api]
@@ -65,7 +65,7 @@ flowchart LR
 
 - Kubernetes cluster and `kubectl` (see [KUBERNETES_SETUP.md §1](KUBERNETES_SETUP.md)).
 - **Metrics DB**: reachable PostgreSQL for APIs; Secrets `DB_PASS` per API (see [KUBERNETES_SETUP.md §4.3](KUBERNETES_SETUP.md)).
-- **Auth DB**: PostgreSQL instance with database/user for the auth schema (defaults in code: database `bulutauth`, user configurable via `AUTH_DB_USER`).
+- **Auth DB**: PostgreSQL instance with database/user for the auth schema (defaults in code: database `datalake_auth`, user configurable via `AUTH_DB_USER`).
 - Ingress controller (NGINX example in [`k8s/ingress.yaml`](../k8s/ingress.yaml)).
 
 ---
@@ -74,9 +74,9 @@ flowchart LR
 
 ### 4.1 API database passwords
 
-Unchanged from [KUBERNETES_SETUP.md §4.3](KUBERNETES_SETUP.md): create `bulutistan-*-api-secret` with key `DB_PASS` for each API.
+Unchanged from [KUBERNETES_SETUP.md §4.3](KUBERNETES_SETUP.md): create `datalake-*-api-secret` with key `DB_PASS` for each API.
 
-### 4.2 Dash auth and JWT (`bulutistan-auth-secrets`)
+### 4.2 Dash auth and JWT (`datalake-auth-secrets`)
 
 Create a Secret with keys consumed by [`src/auth/config.py`](../src/auth/config.py) and JWT helpers:
 
@@ -92,7 +92,7 @@ Reference template (do not commit real values): [`k8s/auth-secrets-reference.yam
 Example:
 
 ```bash
-kubectl create secret generic bulutistan-auth-secrets \
+kubectl create secret generic datalake-auth-secrets \
   --from-literal=SECRET_KEY='...' \
   --from-literal=AUTH_DB_PASS='...' \
   --from-literal=FERNET_KEY='...' \
@@ -109,11 +109,11 @@ For GitOps, use Sealed Secrets, External Secrets, or your cloud secret store ins
 
 Edit per-service ConfigMaps for `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, Redis, and optional `API_JWT_SECRET` / `API_AUTH_REQUIRED` to match your security model. See [KUBERNETES_SETUP.md §4.4](KUBERNETES_SETUP.md).
 
-### 5.2 Frontend ConfigMap (`bulutistan-frontend-config`)
+### 5.2 Frontend ConfigMap (`datalake-frontend-config`)
 
 [`k8s/frontend/configmap.yaml`](../k8s/frontend/configmap.yaml) must include:
 
-- **API URLs**: `DATACENTER_API_URL`, `CUSTOMER_API_URL`, `QUERY_API_URL` (or a single `API_BASE_URL` if your client is configured that way). Use in-cluster DNS names on port 80, e.g. `http://bulutistan-datacenter-api`.
+- **API URLs**: `DATACENTER_API_URL`, `CUSTOMER_API_URL`, `QUERY_API_URL` (or a single `API_BASE_URL` if your client is configured that way). Use in-cluster DNS names on port 80, e.g. `http://datalake-datacenter-api`.
 - **Auth DB (non-secret)**: `AUTH_DB_HOST`, `AUTH_DB_PORT`, `AUTH_DB_NAME`, `AUTH_DB_USER`.
 - **Production**: set `AUTH_DISABLED` to `false` (or omit; default is auth enabled when unset).
 
@@ -125,8 +125,8 @@ Adjust hostnames for your auth PostgreSQL endpoint (FQDN or Service name if Post
 
 [`k8s/frontend/deployment.yaml`](../k8s/frontend/deployment.yaml) uses:
 
-- `envFrom` → `configMapRef` `bulutistan-frontend-config`
-- `envFrom` → `secretRef` `bulutistan-auth-secrets`
+- `envFrom` → `configMapRef` `datalake-frontend-config`
+- `envFrom` → `secretRef` `datalake-auth-secrets`
 
 Pods will not become Ready until the Secret exists and auth DB is reachable (migrations run at startup).
 
@@ -136,7 +136,7 @@ Pods will not become Ready until the Secret exists and auth DB is reachable (mig
 
 1. Namespace (if not using `default`).
 2. **Redis** — [`k8s/redis/`](../k8s/redis/).
-3. **Secrets** — API `DB_PASS` secrets + `bulutistan-auth-secrets`.
+3. **Secrets** — API `DB_PASS` secrets + `datalake-auth-secrets`.
 4. **API ConfigMaps** → **API Deployments/Services**.
 5. **Frontend ConfigMap** → **Frontend Deployment/Service**.
 6. **Ingress**.
@@ -150,29 +150,29 @@ To ship a **new container image** without changing manifests:
 
 ```bash
 # Replace <namespace>, registry, and tag
-kubectl set image deployment/bulutistan-frontend \
-  bulutistan-frontend=<your-registry>/bulutistan-frontend:<new-tag> \
+kubectl set image deployment/datalake-frontend \
+  datalake-frontend=<your-registry>/datalake-frontend:<new-tag> \
   -n <namespace>
 
-kubectl rollout status deployment/bulutistan-frontend -n <namespace>
+kubectl rollout status deployment/datalake-frontend -n <namespace>
 ```
 
 Same pattern for APIs:
 
 ```bash
-kubectl set image deployment/bulutistan-datacenter-api \
-  bulutistan-datacenter-api=<your-registry>/bulutistan-datacenter-api:<new-tag> \
+kubectl set image deployment/datalake-datacenter-api \
+  datalake-datacenter-api=<your-registry>/datalake-datacenter-api:<new-tag> \
   -n <namespace>
-kubectl rollout status deployment/bulutistan-datacenter-api -n <namespace>
+kubectl rollout status deployment/datalake-datacenter-api -n <namespace>
 ```
 
-Repeat for `bulutistan-customer-api` and `bulutistan-query-api`.
+Repeat for `datalake-customer-api` and `datalake-query-api`.
 
 ### 8.1 Rollback
 
 ```bash
-kubectl rollout undo deployment/bulutistan-frontend -n <namespace>
-kubectl rollout status deployment/bulutistan-frontend -n <namespace>
+kubectl rollout undo deployment/datalake-frontend -n <namespace>
+kubectl rollout status deployment/datalake-frontend -n <namespace>
 ```
 
 ### 8.2 Config-only changes
@@ -181,7 +181,7 @@ After editing a ConfigMap or Secret:
 
 ```bash
 kubectl apply -f k8s/frontend/configmap.yaml
-kubectl rollout restart deployment/bulutistan-frontend -n <namespace>
+kubectl rollout restart deployment/datalake-frontend -n <namespace>
 ```
 
 ### 8.3 Auth migrations

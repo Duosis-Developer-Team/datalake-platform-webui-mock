@@ -383,7 +383,7 @@ dmc.Title(
 |------|-------|------|
 | `variant="gradient"` | `"gradient"` | Mantine'nin gradyan metin modunu aktif eder |
 | `gradient.from` | `"#1a1b41"` | Sol: Koyu lacivert (neredeyse siyah-mavi) |
-| `gradient.to` | `"#4318FF"` | Sağ: Bulutistan marka moru |
+| `gradient.to` | `"#4318FF"` | Sağ: Datalake marka moru |
 | `gradient.deg` | `90` | Soldan sağa yatay geçiş |
 | `fontWeight` | `900` | Maksimum kalınlık |
 | `letterSpacing` | `"-0.02em"` | Harfler biraz sıkışık — premium SaaS tarzı |

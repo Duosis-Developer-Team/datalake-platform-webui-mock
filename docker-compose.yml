@@ -62,7 +62,7 @@ services:
     image: postgres:15
     container_name: datalake-platform-gui-db
     environment:
-      POSTGRES_DB: bulutlake
+      POSTGRES_DB: datalake
       POSTGRES_USER: datalakeui
       POSTGRES_PASSWORD: change_me
     ports:
@@ -70,7 +70,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U datalakeui -d bulutlake"]
+      test: ["CMD-SHELL", "pg_isready -U datalakeui -d datalake"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -81,7 +81,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: bulutistan-redis
+    container_name: datalake-redis
     ports:
       - "6379:6379"
     volumes:
@@ -101,7 +101,7 @@ services:
     build:
       context: ./services/datacenter-api
       dockerfile: Dockerfile
-    container_name: bulutistan-datacenter-api
+    container_name: datalake-datacenter-api
     ports:
       - "8000:8000"
     env_file:
@@ -131,7 +131,7 @@ services:
     build:
       context: ./services/customer-api
       dockerfile: Dockerfile
-    container_name: bulutistan-customer-api
+    container_name: datalake-customer-api
     ports:
       - "8001:8000"
     env_file:
@@ -161,7 +161,7 @@ services:
     build:
       context: ./services/query-api
       dockerfile: Dockerfile
-    container_name: bulutistan-query-api
+    container_name: datalake-query-api
     ports:
       - "8002:8000"
     env_file:

@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bulutistan-redis
+  name: datalake-redis
   labels:
-    app: bulutistan-redis
+    app: datalake-redis
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: bulutistan-redis
+      app: datalake-redis
   template:
     metadata:
       labels:
-        app: bulutistan-redis
+        app: datalake-redis
     spec:
       containers:
         - name: redis

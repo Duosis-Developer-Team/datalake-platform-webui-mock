@@ -23,7 +23,7 @@ def test_settings_db_port_default():
 
 
 def test_settings_db_name_default():
-    assert settings.db_name == "bulutlake"
+    assert settings.db_name == "datalake"
 
 
 def test_settings_db_user_default():

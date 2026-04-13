@@ -9,7 +9,7 @@ services:
     image: postgres:15
     container_name: datalake-webui-mock-auth-db
     environment:
-      POSTGRES_DB: ${AUTH_DB_NAME:-bulutauth}
+      POSTGRES_DB: ${AUTH_DB_NAME:-datalake_auth}
       POSTGRES_USER: ${AUTH_DB_USER:-authadmin}
       POSTGRES_PASSWORD: ${AUTH_DB_PASS:-change_me_auth}
     ports:
@@ -17,7 +17,7 @@ services:
     volumes:
       - mock_auth_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-authadmin} -d ${AUTH_DB_NAME:-bulutauth}"]
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-authadmin} -d ${AUTH_DB_NAME:-datalake_auth}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -36,7 +36,7 @@ services:
       APP_BRAND_TITLE: ${APP_BRAND_TITLE:-Datalake WebUI}
       AUTH_DB_HOST: auth-db
       AUTH_DB_PORT: "5432"
-      AUTH_DB_NAME: ${AUTH_DB_NAME:-bulutauth}
+      AUTH_DB_NAME: ${AUTH_DB_NAME:-datalake_auth}
       AUTH_DB_USER: ${AUTH_DB_USER:-authadmin}
       AUTH_DB_PASS: ${AUTH_DB_PASS:-change_me_auth}
       SECRET_KEY: ${SECRET_KEY:-change_me_secret_key}

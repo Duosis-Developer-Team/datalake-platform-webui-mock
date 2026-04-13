@@ -6,6 +6,8 @@ import dash_mantine_components as dmc
 from dash import dcc, html
 from dash_iconify import DashIconify
 
+from src.utils.branding import get_brand_title
+
 
 def build_login_layout(next_path: str = "/", error: bool = False) -> html.Div:
     action = "/auth/login"
@@ -34,7 +36,7 @@ def build_login_layout(next_path: str = "/", error: bool = False) -> html.Div:
                                 gap="sm",
                                 children=[
                                     DashIconify(icon="mdi:cloud", width=36, color="#4318FF"),
-                                    dmc.Text("Bulutistan Dashboard", fw=800, size="lg", c="#2B3674"),
+                                    dmc.Text(get_brand_title(), fw=800, size="lg", c="#2B3674"),
                                 ],
                             ),
                             dmc.Text("Sign in to continue", size="sm", c="dimmed"),

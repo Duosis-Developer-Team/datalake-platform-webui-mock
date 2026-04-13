@@ -27,7 +27,7 @@ For **authentication** (auth DB Secret, rolling upgrades, Globe View egress), se
 |------|-----------|----------|
 | **A — Mock + auth DB** | [`k8s-mock/`](../k8s-mock/) | Demo UI with static data (`APP_MODE=mock`) plus in-cluster **PostgreSQL** for RBAC / Settings (same model as [`docker-compose.mock.yml`](../docker-compose.mock.yml)). No metrics APIs or Redis. |
 | **B — Full stack** | [`k8s/`](../k8s/) | Dash frontend + three FastAPI services + Redis + Ingress. PostgreSQL is external. |
-| **C — Monitoring (optional)** | [`k8s/monitoring/`](../k8s/monitoring/) | Namespace `bulutistan-monitoring`, Prometheus config, Fluent Bit. Separate from app namespaces. |
+| **C — Monitoring (optional)** | [`k8s/monitoring/`](../k8s/monitoring/) | Namespace `datalake-monitoring`, Prometheus config, Fluent Bit. Separate from app namespaces. |
 
 ---
 
@@ -114,18 +114,18 @@ Build from the repository root with the **tags expected by the YAML** (or change
 
 | Component | Build context | Example tag in manifests |
 |-----------|---------------|---------------------------|
-| Dash (frontend) | `.` (root) | `bulutistan-frontend:latest` |
-| datacenter-api | `services/datacenter-api` | `bulutistan-datacenter-api:latest` |
-| customer-api | `services/customer-api` | `bulutistan-customer-api:latest` |
-| query-api | `services/query-api` | `bulutistan-query-api:latest` |
+| Dash (frontend) | `.` (root) | `datalake-frontend:latest` |
+| datacenter-api | `services/datacenter-api` | `datalake-datacenter-api:latest` |
+| customer-api | `services/customer-api` | `datalake-customer-api:latest` |
+| query-api | `services/query-api` | `datalake-query-api:latest` |
 
 Example commands:
 
 ```bash
-docker build -t bulutistan-frontend:latest --build-arg APP_BUILD_ID=k8s .
-docker build -t bulutistan-datacenter-api:latest services/datacenter-api
-docker build -t bulutistan-customer-api:latest services/customer-api
-docker build -t bulutistan-query-api:latest services/query-api
+docker build -t datalake-frontend:latest --build-arg APP_BUILD_ID=k8s .
+docker build -t datalake-datacenter-api:latest services/datacenter-api
+docker build -t datalake-customer-api:latest services/customer-api
+docker build -t datalake-query-api:latest services/query-api
 ```
 
 Load or push images the same way as in §3.2. **Redis** uses the public image `redis:7-alpine` from the manifest; no local build required.
@@ -136,18 +136,18 @@ The repository does **not** commit Secret YAML for database passwords. Each API 
 
 | Deployment | Secret name | Key |
 |------------|-------------|-----|
-| customer-api | `bulutistan-customer-api-secret` | `DB_PASS` |
-| datacenter-api | `bulutistan-datacenter-api-secret` | `DB_PASS` |
-| query-api | `bulutistan-query-api-secret` | `DB_PASS` |
+| customer-api | `datalake-customer-api-secret` | `DB_PASS` |
+| datacenter-api | `datalake-datacenter-api-secret` | `DB_PASS` |
+| query-api | `datalake-query-api-secret` | `DB_PASS` |
 
 Example (replace `YOUR_PASSWORD` and optionally set namespace `-n your-namespace`):
 
 ```bash
-kubectl create secret generic bulutistan-customer-api-secret \
+kubectl create secret generic datalake-customer-api-secret \
   --from-literal=DB_PASS='YOUR_PASSWORD'
-kubectl create secret generic bulutistan-datacenter-api-secret \
+kubectl create secret generic datalake-datacenter-api-secret \
   --from-literal=DB_PASS='YOUR_PASSWORD'
-kubectl create secret generic bulutistan-query-api-secret \
+kubectl create secret generic datalake-query-api-secret \
   --from-literal=DB_PASS='YOUR_PASSWORD'
 ```
 
@@ -167,7 +167,7 @@ Set at least:
 
 For **customer-api** and **datacenter-api**, keep Redis pointing at the in-cluster service:
 
-- `REDIS_HOST`: `bulutistan-redis`
+- `REDIS_HOST`: `datalake-redis`
 - `REDIS_PORT`: `6379`
 
 These names must match [`k8s/redis/service.yaml`](../k8s/redis/service.yaml).
@@ -179,20 +179,20 @@ The Dash app reads URLs from [`src/services/api_client.py`](../src/services/api_
 **Recommended** for pods calling ClusterIP Services on port **80** (targets container port 8000):
 
 ```yaml
-# In k8s/frontend/configmap.yaml (bulutistan-frontend-config)
-DATACENTER_API_URL: "http://bulutistan-datacenter-api"
-CUSTOMER_API_URL: "http://bulutistan-customer-api"
-QUERY_API_URL: "http://bulutistan-query-api"
+# In k8s/frontend/configmap.yaml (datalake-frontend-config)
+DATACENTER_API_URL: "http://datalake-datacenter-api"
+CUSTOMER_API_URL: "http://datalake-customer-api"
+QUERY_API_URL: "http://datalake-query-api"
 ```
 
 You can omit `API_BASE_URL` when all three are set. If you use a single reverse proxy inside the cluster, set only `API_BASE_URL` to that gateway’s URL.
 
-**Note:** The checked-in example `API_BASE_URL: "http://bulutistan-data-api"` does not match a Service name in this repo; adjust it as above or your UI will fail to reach the APIs.
+**Note:** The checked-in example `API_BASE_URL: "http://datalake-data-api"` does not match a Service name in this repo; adjust it as above or your UI will fail to reach the APIs.
 
 After editing the ConfigMap, restart the frontend Deployment if pods were already running:
 
 ```bash
-kubectl rollout restart deployment/bulutistan-frontend
+kubectl rollout restart deployment/datalake-frontend
 ```
 
 ### 4.6 Apply order (recommended)
@@ -254,16 +254,16 @@ All of the above use the **default** namespace unless you add `metadata.namespac
 
 ### 4.7 Ingress routing
 
-[`k8s/ingress.yaml`](../k8s/ingress.yaml) uses host **`bulutistan.local`** and `ingressClassName: nginx`. Path routing matches [TOPOLOGY_AND_SETUP.md §6](TOPOLOGY_AND_SETUP.md):
+[`k8s/ingress.yaml`](../k8s/ingress.yaml) uses host **`datalake.local`** and `ingressClassName: nginx`. Path routing matches [TOPOLOGY_AND_SETUP.md §6](TOPOLOGY_AND_SETUP.md):
 
 | Path prefix | Backend Service |
 |-------------|-----------------|
-| `/api/v1/sla`, `/api/v1/physical-inventory`, `/api/v1/datacenters`, `/api/v1/dashboard`, `/health` | `bulutistan-datacenter-api` |
-| `/api/v1/customers` | `bulutistan-customer-api` |
-| `/api/v1/queries` | `bulutistan-query-api` |
-| `/` | `bulutistan-frontend` |
+| `/api/v1/sla`, `/api/v1/physical-inventory`, `/api/v1/datacenters`, `/api/v1/dashboard`, `/health` | `datalake-datacenter-api` |
+| `/api/v1/customers` | `datalake-customer-api` |
+| `/api/v1/queries` | `datalake-query-api` |
+| `/` | `datalake-frontend` |
 
-Configure DNS or `/etc/hosts` for `bulutistan.local` to the ingress entrypoint, same idea as §3.5.
+Configure DNS or `/etc/hosts` for `datalake.local` to the ingress entrypoint, same idea as §3.5.
 
 ### 4.8 TLS (optional)
 
@@ -273,7 +273,7 @@ The example Ingress manifest does not define TLS. For HTTPS, add a `tls` section
 
 ## 5. Path C — Monitoring (`k8s/monitoring/`)
 
-Optional components in namespace **`bulutistan-monitoring`**:
+Optional components in namespace **`datalake-monitoring`**:
 
 1. [`k8s/monitoring/namespace.yaml`](../k8s/monitoring/namespace.yaml)
 2. [`k8s/monitoring/prometheus-config.yaml`](../k8s/monitoring/prometheus-config.yaml)
@@ -297,8 +297,8 @@ kubectl get pods -w   # wait until Running / Ready
 Check logs on failure:
 
 ```bash
-kubectl logs deployment/bulutistan-frontend
-kubectl logs deployment/bulutistan-datacenter-api
+kubectl logs deployment/datalake-frontend
+kubectl logs deployment/datalake-datacenter-api
 ```
 
 ---

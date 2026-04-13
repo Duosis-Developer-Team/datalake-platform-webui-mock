@@ -36,13 +36,13 @@ FROM public.ibm_lpar_general;
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'infra_svc') THEN
-        CREATE USER infra_svc WITH PASSWORD 'InfraSvc@Bulut2026';
+        CREATE USER infra_svc WITH PASSWORD 'InfraSvc@Datalake2026';
     END IF;
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'customer_svc') THEN
-        CREATE USER customer_svc WITH PASSWORD 'CustomerSvc@Bulut2026';
+        CREATE USER customer_svc WITH PASSWORD 'CustomerSvc@Datalake2026';
     END IF;
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'query_svc') THEN
-        CREATE USER query_svc WITH PASSWORD 'QuerySvc@Bulut2026';
+        CREATE USER query_svc WITH PASSWORD 'QuerySvc@Datalake2026';
     END IF;
 END;
 $$;

@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bulutistan-query-api
+  name: datalake-query-api
   labels:
-    app: bulutistan-query-api
+    app: datalake-query-api
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: bulutistan-query-api
+      app: datalake-query-api
   template:
     metadata:
       labels:
-        app: bulutistan-query-api
+        app: datalake-query-api
     spec:
       containers:
-        - name: bulutistan-query-api
-          image: bulutistan-query-api:latest
+        - name: datalake-query-api
+          image: datalake-query-api:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -43,25 +43,25 @@ spec:
             - name: DB_HOST
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-query-api-config
+                  name: datalake-query-api-config
                   key: DB_HOST
             - name: DB_PORT
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-query-api-config
+                  name: datalake-query-api-config
                   key: DB_PORT
             - name: DB_NAME
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-query-api-config
+                  name: datalake-query-api-config
                   key: DB_NAME
             - name: DB_USER
               valueFrom:
                 configMapKeyRef:
-                  name: bulutistan-query-api-config
+                  name: datalake-query-api-config
                   key: DB_USER
             - name: DB_PASS
               valueFrom:
                 secretKeyRef:
-                  name: bulutistan-query-api-secret
+                  name: datalake-query-api-secret
                   key: DB_PASS

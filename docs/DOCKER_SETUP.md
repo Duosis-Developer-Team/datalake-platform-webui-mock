@@ -57,7 +57,7 @@ Ardından kendi ortamınıza göre düzenleyin.
 ```env
 DB_HOST=10.134.16.6
 DB_PORT=5000
-DB_NAME=bulutlake
+DB_NAME=datalake
 DB_USER=datalakeui
 DB_PASS=changeme
 ```
@@ -71,7 +71,7 @@ Değerleri kendi gerçek veritabanı bilgilerinizle değiştirin.
 ```env
 DB_HOST=db
 DB_PORT=5432
-DB_NAME=bulutlake
+DB_NAME=datalake
 DB_USER=datalakeui
 DB_PASS=changeme
 ```
@@ -177,14 +177,14 @@ Bu senaryoda hem uygulama hem de PostgreSQL aynı `docker-compose.yml` içinde t
 ```env
 DB_HOST=db
 DB_PORT=5432
-DB_NAME=bulutlake
+DB_NAME=datalake
 DB_USER=datalakeui
 DB_PASS=changeme
 ```
 
 `docker-compose.yml` içindeki `db` servisi şu ortam değişkenlerini kullanır:
 
-- `POSTGRES_DB=bulutlake`
+- `POSTGRES_DB=datalake`
 - `POSTGRES_USER=datalakeui`
 - `POSTGRES_PASSWORD=change_me`
 

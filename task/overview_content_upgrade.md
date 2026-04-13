@@ -2343,7 +2343,7 @@ def create_dc_treemap(dc_names, dc_vms, height=320):
         marker=dict(
             colorscale=[
                 [0.0,  "#7B2FFF"],          # Düşük VM → Derin mor
-                [0.35, "#4318FF"],          # Orta → Bulutistan moru
+                [0.35, "#4318FF"],          # Orta → Datalake moru
                 [0.70, "#2196F3"],          # Yüksek → Mavi
                 [1.0,  "#05CD99"],          # En yüksek VM → Turkuaz
             ],

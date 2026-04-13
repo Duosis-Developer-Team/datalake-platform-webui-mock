@@ -18,7 +18,7 @@ See root [`env.example`](../env.example) for `AUTH_*`, `SECRET_KEY`, `FERNET_KEY
 
 ## Kubernetes
 
-- Create Secret `bulutistan-auth-secrets` (see [`k8s/auth-secrets-reference.yaml`](../k8s/auth-secrets-reference.yaml)).
+- Create Secret `datalake-auth-secrets` (see [`k8s/auth-secrets-reference.yaml`](../k8s/auth-secrets-reference.yaml)).
 - Set non-secret auth DB keys in [`k8s/frontend/configmap.yaml`](../k8s/frontend/configmap.yaml).
 - Full steps: [K8S_DEPLOYMENT_AND_UPDATE.md](K8S_DEPLOYMENT_AND_UPDATE.md).
 

@@ -2,7 +2,7 @@
 
 **Tarih:** 27 Şubat 2026  
 **Hazırlayan:** Antigravity AI  
-**Proje:** Bulutistan Dashboard (Monolitik Dash Uygulaması)  
+**Proje:** Datalake Dashboard (Monolitik Dash Uygulaması)  
 **Durum:** Salt-Okunur Analiz — Hiçbir dosya değiştirilmedi
 
 ---
@@ -52,7 +52,7 @@ graph TB
     end
 
     subgraph "Altyapı"
-        T[("PostgreSQL 15<br/>DB: bulutlake<br/>Port: 5000")]
+        T[("PostgreSQL 15<br/>DB: datalake<br/>Port: 5000")]
     end
 
     D & E & F & G & H --> I
@@ -169,7 +169,7 @@ graph LR
         F[".env dosyası"]
         F --> G["DB_HOST=10.134.16.6"]
         F --> H["DB_PORT=5000"]
-        F --> I["DB_NAME=bulutlake"]
+        F --> I["DB_NAME=datalake"]
         F --> J["DB_USER=datalakeui"]
         F --> K["DB_PASS=changeme"]
     end
@@ -275,7 +275,7 @@ Bu sistem, `QUERY_REGISTRY` (Python kodundaki sabit SQL'ler) üzerine JSON taban
 
 ### 3.1 PostgreSQL Veritabanı Tabloları Haritası
 
-Tüm sorgu dosyalarının analizi sonucunda, `bulutlake` veritabanında en az **13 tablo** tespit edildi:
+Tüm sorgu dosyalarının analizi sonucunda, `datalake` veritabanında en az **13 tablo** tespit edildi:
 
 ```mermaid
 erDiagram
@@ -531,7 +531,7 @@ Bu dosya Grafana'nın `_DL - Datalake - Customer Assets` dashboard'unu replicate
 |----------|-----------|----------|----------|
 | `DB_HOST` | `10.134.16.6` | ✅ Evet | PostgreSQL sunucu adresi |
 | `DB_PORT` | `5000` | ✅ Evet | **Standart dışı port!** |
-| `DB_NAME` | `bulutlake` | ✅ Evet | Veritabanı adı |
+| `DB_NAME` | `datalake` | ✅ Evet | Veritabanı adı |
 | `DB_USER` | `datalakeui` | ✅ Evet | DB kullanıcı adı |
 | `DB_PASS` | `changeme` | ✅ Evet | DB şifresi |
 

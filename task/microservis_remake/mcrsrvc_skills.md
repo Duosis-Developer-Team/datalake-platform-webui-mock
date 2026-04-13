@@ -1,4 +1,4 @@
-# Bulutistan Dashboard — Mikro Servis Dönüşümü: Workflow Anayasası (Skills)
+# Datalake Dashboard — Mikro Servis Dönüşümü: Workflow Anayasası (Skills)
 
 > Bu dosya, Executer (Claude Code / Cursor) ajanının çalışma şeklini belirleyen MUTLAK KURALLARDIR.
 > Hiçbir ajan, hiçbir koşulda bu kuralları ihlal edemez.
@@ -63,7 +63,7 @@ Docstring KULLANILMAZ; fonksiyon imzası ve dönüş tipi yeterli olmalıdır.
 
 ---
 
-## 8. Proje Spesifik Kurallar (Bulutistan Dashboard)
+## 8. Proje Spesifik Kurallar (Datalake Dashboard)
 
 ### 8.1 Mevcut Mimari Özeti
 

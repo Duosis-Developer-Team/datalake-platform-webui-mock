@@ -177,7 +177,7 @@ Mevcut iş mantığını `backend/app/` altına taşı. CTO kararlarını uygula
   class Settings(BaseSettings):
       db_host: str = "10.134.16.6"
       db_port: str = "5000"
-      db_name: str = "bulutlake"
+      db_name: str = "datalake"
       db_user: str = "datalakeui"
       db_pass: str = ""
 
@@ -270,7 +270,7 @@ Taşınan iş mantığını HTTP endpoint'lerine bağla.
 ### 3.7 — main.py Entrypoint
 
 - [ ] `backend/app/main.py` oluştur:
-  - FastAPI instance'ı oluştur (`title="Bulutistan Dashboard API"`)
+  - FastAPI instance'ı oluştur (`title="Datalake Dashboard API"`)
   - Tüm router'ları dahil et
   - `lifespan` context manager ile startup'ta `DatabaseService` singleton oluştur ve cache'i ısıt
   - Scheduler'ı başlat
@@ -356,7 +356,7 @@ Taşınan iş mantığını HTTP endpoint'lerine bağla.
   ```yaml
   backend:
     build: ./backend
-    container_name: bulutistan-backend-api
+    container_name: datalake-backend-api
     ports:
       - "8000:8000"
     env_file:
@@ -369,9 +369,9 @@ Taşınan iş mantığını HTTP endpoint'lerine bağla.
 
 ### ADIM 5 — Doğrulama
 
-- [ ] `cd backend && docker build -t bulutistan-backend:test .` → hatasız tamamlanıyor
-- [ ] Image boyutu < 500MB: `docker images bulutistan-backend:test --format "{{.Size}}"`
-- [ ] `docker run -d --name test-backend -p 8000:8000 --env-file ../.env bulutistan-backend:test`
+- [ ] `cd backend && docker build -t datalake-backend:test .` → hatasız tamamlanıyor
+- [ ] Image boyutu < 500MB: `docker images datalake-backend:test --format "{{.Size}}"`
+- [ ] `docker run -d --name test-backend -p 8000:8000 --env-file ../.env datalake-backend:test`
 - [ ] `sleep 5 && curl -f http://localhost:8000/health` → `{"status": "healthy"}`
 - [ ] `docker logs test-backend` → hata satırı yok
 - [ ] `docker stop test-backend && docker rm test-backend` → graceful shutdown
@@ -388,7 +388,7 @@ Taşınan iş mantığını HTTP endpoint'lerine bağla.
 
 - [ ] `k8s/backend/deployment.yaml` oluştur:
   - `replicas: 2`
-  - Container: `bulutistan-backend:latest`, port 8000
+  - Container: `datalake-backend:latest`, port 8000
   - Resource limits: `cpu: 500m`, `memory: 512Mi`
   - Resource requests: `cpu: 250m`, `memory: 256Mi`
   - `livenessProbe`: `GET /health`, `initialDelaySeconds: 10`, `periodSeconds: 30`

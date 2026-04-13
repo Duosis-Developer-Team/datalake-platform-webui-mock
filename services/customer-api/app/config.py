@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     db_host: str = "10.134.16.6"
     db_port: str = "5000"
-    db_name: str = "bulutlake"
+    db_name: str = "datalake"
     db_user: str = "customer_svc"
     db_pass: str = ""
     redis_host: str = "localhost"
