@@ -17,6 +17,8 @@ Step-by-step setup for deploying this repository on Kubernetes using the manifes
 
 This repo ships plain YAML (no Helm/Kustomize). You can wrap these files in your own tooling later.
 
+For **authentication** (auth DB Secret, rolling upgrades, Globe View egress), see [K8S_DEPLOYMENT_AND_UPDATE.md](K8S_DEPLOYMENT_AND_UPDATE.md).
+
 ---
 
 ## 2. Choose a deployment path
@@ -294,6 +296,8 @@ The sample manifests are a starting point. Before production, consider: Pod Secu
 
 | Document | Content |
 |----------|---------|
+| [K8S_DEPLOYMENT_AND_UPDATE.md](K8S_DEPLOYMENT_AND_UPDATE.md) | Auth Secrets, frontend ConfigMap/Secret wiring, rolling updates, Globe View egress |
+| [AUTH_SYSTEM.md](AUTH_SYSTEM.md) | Auth stack summary and link to full upstream doc |
 | [TOPOLOGY_AND_SETUP.md](TOPOLOGY_AND_SETUP.md) | Architecture, env vars, local and Compose setup |
 | [DOCKER_SETUP.md](DOCKER_SETUP.md) | Docker and Docker Compose |
 | [env.example](../env.example) | Environment variable reference |

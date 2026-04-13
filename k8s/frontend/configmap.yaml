@@ -6,3 +6,9 @@ data:
   DATACENTER_API_URL: "http://bulutistan-datacenter-api"
   CUSTOMER_API_URL: "http://bulutistan-customer-api"
   QUERY_API_URL: "http://bulutistan-query-api"
+  # Auth PostgreSQL (non-secret keys). Set AUTH_DB_HOST to your auth DB endpoint.
+  AUTH_DB_HOST: "replace-with-auth-postgres-host"
+  AUTH_DB_PORT: "5432"
+  AUTH_DB_NAME: "bulutauth"
+  AUTH_DB_USER: "authadmin"
+  AUTH_DISABLED: "false"

@@ -9,7 +9,7 @@ import dash_mantine_components as dmc
 from dash import ALL, Input, Output, State, callback, ctx, no_update
 from dash.exceptions import PreventUpdate
 
-from src.services import mock_admin_client as settings_crud
+from src.services import admin_client as settings_crud
 
 logger = logging.getLogger(__name__)
 

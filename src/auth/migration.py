@@ -92,6 +92,29 @@ def run_migrations() -> None:
                     """
                 )
                 logger.info("Auth DB migration v2 applied (settings rename)")
+            cur.execute("SELECT 1 FROM schema_migrations WHERE version = 3")
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE teams ADD COLUMN IF NOT EXISTS description TEXT")
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS team_roles (
+                        team_id INT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+                        role_id INT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+                        PRIMARY KEY (team_id, role_id)
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_team_roles_team ON team_roles(team_id)"
+                )
+                cur.execute(
+                    """
+                    INSERT INTO schema_migrations (version, description)
+                    VALUES (3, 'teams description and team_roles')
+                    ON CONFLICT (version) DO NOTHING
+                    """
+                )
+                logger.info("Auth DB migration v3 applied (team_roles)")
             cur.close()
         _MIGRATION_RAN = True
         logger.info("Auth DB migrations applied")

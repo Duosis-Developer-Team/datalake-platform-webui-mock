@@ -9,7 +9,7 @@ import dash_mantine_components as dmc
 from dash import ALL, Input, Output, State, callback, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 
-from src.services import mock_admin_client as settings_crud
+from src.services import admin_client as settings_crud
 
 logger = logging.getLogger(__name__)
 
@@ -243,4 +243,3 @@ def add_team_members_click(_n, tid, user_vals):
     except Exception as exc:
         logger.exception("add_team_members")
         return no_update, no_update, dmc.Alert(f"Add failed: {exc}", color="red", variant="light")
-

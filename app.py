@@ -106,6 +106,7 @@ from src.pages.dc_view import _bps_to_gbps, _build_compute_tab
 from src.pages.settings.iam import roles_callbacks  # noqa: F401
 from src.pages.settings.iam import teams_callbacks  # noqa: F401
 from src.pages.settings.iam import users_callbacks  # noqa: F401
+from src.pages.settings.integrations import ldap_callbacks  # noqa: F401
 from src.utils.app_mode import is_mock_mode
 
 _default_tr = default_time_range()
