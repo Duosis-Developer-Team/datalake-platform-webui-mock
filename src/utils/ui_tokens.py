@@ -39,6 +39,64 @@ def gradient_button_style() -> dict[str, Any]:
     }
 
 
+def html_submit_button_gradient(
+    label: str,
+    *,
+    icon: str | None = None,
+    style_extra: dict[str, Any] | None = None,
+) -> html.Button:
+    """Native HTML submit button with gradient styling (parity with GUI)."""
+    base: dict[str, Any] = {
+        **gradient_button_style(),
+        "cursor": "pointer",
+        "padding": "10px 20px",
+        "borderRadius": "10px",
+        "display": "inline-flex",
+        "alignItems": "center",
+        "gap": "8px",
+        "fontSize": "14px",
+        "fontFamily": "inherit",
+        "boxShadow": "0 2px 8px rgba(85, 44, 248, 0.25)",
+    }
+    if style_extra:
+        base.update(style_extra)
+    if icon:
+        return html.Button(
+            [DashIconify(icon=icon, width=18), label],
+            type="submit",
+            style=base,
+        )
+    return html.Button(label, type="submit", style=base)
+
+
+def html_submit_button_light(
+    label: str,
+    *,
+    scheme: str = "gray",
+    small: bool = False,
+    style_extra: dict[str, Any] | None = None,
+) -> html.Button:
+    schemes: dict[str, dict[str, str]] = {
+        "gray": {"background": "#f8f9fa", "color": "#495057", "border": "1px solid #dee2e6"},
+        "red": {"background": "#fff5f5", "color": "#fa5252", "border": "1px solid #ffc9c9"},
+        "indigo": {"background": "#f3f0ff", "color": "#552cf8", "border": "1px solid #d0bfff"},
+    }
+    s = schemes.get(scheme, schemes["gray"])
+    base: dict[str, Any] = {
+        **s,
+        "cursor": "pointer",
+        "borderRadius": "10px",
+        "fontFamily": "inherit",
+        "fontWeight": 500,
+        "padding": "6px 12px" if small else "8px 16px",
+        "fontSize": "12px" if small else "13px",
+        "transition": "opacity 0.18s ease",
+    }
+    if style_extra:
+        base.update(style_extra)
+    return html.Button(label, type="submit", style=base)
+
+
 def section_header(title: str, subtitle: str | None = None, icon: str | None = None) -> html.Div:
     left = []
     if icon:

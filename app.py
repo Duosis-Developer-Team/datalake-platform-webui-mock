@@ -78,6 +78,9 @@ _log.info("APP_BUILD_ID=%s", APP_BUILD_ID)
 
 from src.pages import home, datacenters, dc_view, customer_view, query_explorer, global_view, region_drilldown
 from src.pages.settings import shell as settings_shell
+from src.pages.settings.iam import roles_callbacks  # noqa: F401
+from src.pages.settings.iam import teams_callbacks  # noqa: F401
+from src.pages.settings.iam import users_callbacks  # noqa: F401
 from src.utils.app_mode import is_mock_mode
 from src.pages.dc_view import _bps_to_gbps, _build_compute_tab
 
