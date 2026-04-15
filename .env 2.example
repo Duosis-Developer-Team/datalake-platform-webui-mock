@@ -1,0 +1,30 @@
+# Copy to .env for local runs. Docker Compose mock sets AUTH_DB_HOST=auth-db automatically.
+
+APP_MODE=mock
+APP_BRAND_TITLE=Datalake WebUI
+
+AUTH_DB_HOST=localhost
+AUTH_DB_PORT=5434
+AUTH_DB_NAME=datalake_auth
+AUTH_DB_USER=authadmin
+AUTH_DB_PASS=change_me_auth
+
+SECRET_KEY=change_me_to_a_long_random_string
+ADMIN_DEFAULT_USERNAME=admin
+ADMIN_DEFAULT_PASSWORD=Admin123!
+
+FERNET_KEY=
+SESSION_TTL_HOURS=24
+AUTH_DISABLED=false
+
+DATACENTER_API_URL=http://localhost:8000
+CUSTOMER_API_URL=http://localhost:8001
+QUERY_API_URL=http://localhost:8002
+
+API_JWT_SECRET=
+API_AUTH_REQUIRED=false
+
+REDIS_URL=
+PERMISSION_MAP_CACHE_TTL_SEC=300
+
+APP_BUILD_ID=local
