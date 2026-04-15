@@ -1082,6 +1082,42 @@ def _detail_row(icon, label, value):
 
 
 @app.callback(
+    dash.Output("global-3d-modal-container", "style", allow_duplicate=True),
+    dash.Output("selected-building-dc-store", "data", allow_duplicate=True),
+    dash.Output("current-view-mode", "data", allow_duplicate=True),
+    dash.Output("floor-map-layer", "children", allow_duplicate=True),
+    dash.Input({"type": "goto-floor-map-btn", "index": ALL}, "n_clicks"),
+    dash.State("global-3d-modal-container", "style"),
+    prevent_initial_call=True,
+)
+def goto_floor_map_from_hologram(btn_clicks, modal_style):
+    ctx = dash.callback_context
+    if not ctx.triggered or all(x is None for x in btn_clicks):
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    trig = ctx.triggered[0]["prop_id"].split(".")[0]
+    try:
+        trig_dict = json.loads(trig)
+    except Exception:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    dc_id = trig_dict.get("index")
+    if not dc_id:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    # Close modal
+    new_modal_style = dict(modal_style) if modal_style else {}
+    new_modal_style["display"] = "none"
+    new_modal_style["pointerEvents"] = "none"
+    # Fetch racks and build floor map
+    info = api.get_dc_details(dc_id, default_time_range())
+    dc_name = info.get("meta", {}).get("name", dc_id)
+    racks_resp = api.get_dc_racks(dc_id)
+    racks = racks_resp.get("racks", [])
+    from src.pages.floor_map import build_floor_map_layout
+    floor_layout = build_floor_map_layout(dc_id, dc_name, racks)
+    dc_store = {"dc_id": dc_id, "dc_name": dc_name}
+    return new_modal_style, dc_store, "floor_map", floor_layout
+
+
+@app.callback(
     dash.Output("floor-map-rack-detail", "children"),
     dash.Input("floor-map-graph", "clickData"),
     dash.State("selected-building-dc-store", "data"),

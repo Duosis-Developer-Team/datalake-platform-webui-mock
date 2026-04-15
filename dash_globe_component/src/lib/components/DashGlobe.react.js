@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -11,11 +11,13 @@ const STATUS_COLOR = {
 };
 
 const DashGlobe = ({ id, setProps, pointsData, focusRegion, height }) => {
-    const containerRef  = useRef();
-    const mapRef        = useRef();
-    const markersRef    = useRef([]);
-    const popupRef      = useRef(null);
-    const hideTimerRef  = useRef(null);
+    const containerRef    = useRef();
+    const mapRef          = useRef();
+    const markersRef      = useRef([]);
+    const popupRef        = useRef(null);
+    const hideTimerRef    = useRef(null);
+    const pointsKeyRef    = useRef(null);  // flicker fix: skip rebuild if data unchanged
+    const buildMarkerRef  = useRef(null);  // stable ref — keeps markers effect dep-free from setProps
 
     useEffect(() => {
         const map = new maplibregl.Map({
@@ -38,7 +40,9 @@ const DashGlobe = ({ id, setProps, pointsData, focusRegion, height }) => {
         return () => map.remove();
     }, []);
 
-    const buildMarker = useCallback((d) => {
+    // Always update the ref so marker closures use the latest setProps
+    // without adding buildMarker to the markers-rebuild useEffect deps.
+    const buildMarker = (d) => {
         const status = (d.status || 'unknown').toLowerCase();
         // Use health-based color from Python if available, fall back to status color
         const color  = d.color || STATUS_COLOR[status] || STATUS_COLOR.unknown;
@@ -113,28 +117,37 @@ const DashGlobe = ({ id, setProps, pointsData, focusRegion, height }) => {
 
             const map = mapRef.current;
             if (!map) return;
-            map.flyTo({ center: [d.lng, d.lat], zoom: 13, speed: 1.4, curve: 1.2 });
+            // Pin click: zoom in close (12); region nav stays at 8
+            map.flyTo({ center: [d.lng, d.lat], zoom: 12, speed: 1.2, curve: 1.1 });
         });
 
         return el;
-    }, [setProps]);
+    };
+    buildMarkerRef.current = buildMarker;
 
     useEffect(() => {
         const map = mapRef.current;
         if (!map || !pointsData) return;
+
+        // Skip full marker rebuild if pointsData content hasn't actually changed.
+        // Dash sends a new array reference on every prop update (e.g. after clickedPoint
+        // is set), which would otherwise remove + re-add all markers → visible flicker.
+        const key = JSON.stringify(pointsData);
+        if (pointsKeyRef.current === key) return;
+        pointsKeyRef.current = key;
 
         markersRef.current.forEach(m => m.remove());
         markersRef.current = [];
 
         pointsData.forEach(d => {
             if (d.lat == null || d.lng == null) return;
-            const el     = buildMarker(d);
+            const el     = buildMarkerRef.current(d);
             const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
                 .setLngLat([d.lng, d.lat])
                 .addTo(map);
             markersRef.current.push(marker);
         });
-    }, [pointsData, buildMarker]);
+    }, [pointsData]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         const map = mapRef.current;
