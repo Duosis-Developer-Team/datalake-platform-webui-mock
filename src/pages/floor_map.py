@@ -38,6 +38,16 @@ STATUS_DARK = {
     "unknown":  "#667085",
 }
 
+# Premium hall color palette — each hall gets a unique tint (Apple/Google style)
+HALL_PALETTE = [
+    {"fill": "#EFF6FF", "border": "#93C5FD", "header": "#DBEAFE", "label": "#1D4ED8"},  # Blue
+    {"fill": "#F0FDF4", "border": "#86EFAC", "header": "#DCFCE7", "label": "#15803D"},  # Green
+    {"fill": "#FDF4FF", "border": "#D8B4FE", "header": "#F3E8FF", "label": "#7E22CE"},  # Purple
+    {"fill": "#FFFBEB", "border": "#FCD34D", "header": "#FEF3C7", "label": "#B45309"},  # Amber
+    {"fill": "#FFF1F2", "border": "#FDA4AF", "header": "#FFE4E6", "label": "#BE123C"},  # Rose
+    {"fill": "#F0FDFA", "border": "#5EEAD4", "header": "#CCFBF1", "label": "#0F766E"},  # Teal
+]
+
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
@@ -174,27 +184,56 @@ def _draw_hall_zone(
     hall_racks: list[dict],
     dims: dict,
     dc_id: str,
+    color: dict | None = None,
 ) -> None:
-    """Draw one hall zone: background rect, label, racks, aisle gaps."""
+    """Draw one hall zone: background rect, colored header band, label, racks, aisle gaps."""
     zone_w = dims["width"]
     zone_h = dims["height"]
+    hc = color or HALL_PALETTE[0]
 
-    # Zone background
+    # Drop shadow (behind the hall card)
+    fig.add_shape(
+        type="rect",
+        x0=hx + 3, y0=hy - 3,
+        x1=hx + zone_w + 3, y1=hy + zone_h - 3,
+        fillcolor="rgba(0,0,0,0.07)",
+        line_width=0,
+        layer="below",
+    )
+    # Zone body
     fig.add_shape(
         type="rect",
         x0=hx, y0=hy,
         x1=hx + zone_w, y1=hy + zone_h,
-        fillcolor="rgba(248,249,252,0.95)",
-        line=dict(color="#E4E7EC", width=1),
+        fillcolor=hc["fill"],
+        line=dict(color=hc["border"], width=1.5),
+        layer="below",
+    )
+    # Colored header band at top
+    fig.add_shape(
+        type="rect",
+        x0=hx, y0=hy + zone_h - ZONE_LABEL_H - ZONE_PAD_TOP,
+        x1=hx + zone_w, y1=hy + zone_h,
+        fillcolor=hc["header"],
+        line=dict(color=hc["border"], width=0),
+        layer="below",
+    )
+    # Left accent stripe
+    fig.add_shape(
+        type="rect",
+        x0=hx, y0=hy,
+        x1=hx + 4, y1=hy + zone_h,
+        fillcolor=hc["border"],
+        line_width=0,
         layer="below",
     )
     # Hall label annotation
     fig.add_annotation(
         x=hx + zone_w / 2,
-        y=hy + zone_h - ZONE_PAD_TOP / 2,
+        y=hy + zone_h - ZONE_PAD_TOP / 2 - ZONE_LABEL_H / 2,
         text=f"<b>{hall_name}</b>",
         showarrow=False,
-        font=dict(size=11, color="#344054"),
+        font=dict(size=11, color=hc["label"], family="DM Sans, sans-serif"),
         xanchor="center",
         yanchor="middle",
     )
@@ -227,13 +266,14 @@ def _draw_hall_zone(
                 name = rack.get("name", f"R{row_idx+1}-C{col_idx+1}")
                 _draw_rack(fig, col_x, row_y, status, name, rack, dc_id)
             else:
-                # Empty slot (dashed outline)
+                # Empty slot — transparent with subtle dashed border matching hall color
+                slot_border = hc.get("border", "#D1D5DB") if color else "#D1D5DB"
                 fig.add_shape(
                     type="rect",
                     x0=col_x, y0=row_y,
                     x1=col_x + RACK_W, y1=row_y + RACK_H,
-                    fillcolor="rgba(0,0,0,0)",
-                    line=dict(color="#D0D5DD", width=0.8, dash="dot"),
+                    fillcolor="rgba(255,255,255,0.4)",
+                    line=dict(color=slot_border, width=0.8, dash="dot"),
                     layer="above",
                 )
 
@@ -241,12 +281,13 @@ def _draw_hall_zone(
         if within_aisle == 0 and row_idx + 1 < rows:
             aisle_y = row_y + RACK_H + GAP_Y / 2
             aisle_label_x = hx + ZONE_PAD_X + (cols * (RACK_W + GAP_X) - GAP_X) / 2
+            aisle_color = hc.get("label", "#98A2B3") if color else "#98A2B3"
             fig.add_annotation(
                 x=aisle_label_x,
                 y=aisle_y,
                 text=f"── Aisle {aisle_group + 1} ──",
                 showarrow=False,
-                font=dict(size=8, color="#98A2B3"),
+                font=dict(size=8, color=aisle_color, family="DM Sans, sans-serif"),
                 xanchor="center",
                 yanchor="middle",
             )
@@ -325,15 +366,37 @@ def build_floor_map_figure(racks: list[dict], dc_id: str) -> go.Figure:
         total_w = max(total_w, hx + d["width"] + FLOOR_PAD)
         total_h = max(total_h, hy + d["height"] + FLOOR_PAD)
 
-    # Draw hall zones
-    for hall_name in hall_names:
+    # Draw building perimeter first (below everything)
+    wall_pad = FLOOR_PAD / 2
+    # Outer shadow
+    fig.add_shape(
+        type="rect",
+        x0=wall_pad + 4, y0=wall_pad - 4,
+        x1=total_w - wall_pad + 4, y1=total_h - wall_pad - 4,
+        fillcolor="rgba(0,0,0,0.08)",
+        line_width=0,
+        layer="below",
+    )
+    # Building interior floor (slightly warmer than outer bg)
+    fig.add_shape(
+        type="rect",
+        x0=wall_pad, y0=wall_pad,
+        x1=total_w - wall_pad, y1=total_h - wall_pad,
+        fillcolor="#F8FAFC",
+        line=dict(color="#CBD5E1", width=2),
+        layer="below",
+    )
+
+    # Draw hall zones — each with its own color from the palette
+    for i, hall_name in enumerate(hall_names):
         hx, hy = hall_positions[hall_name]
-        _draw_hall_zone(fig, hx, hy, hall_name, halls[hall_name], hall_dims[hall_name], dc_id)
+        palette_color = HALL_PALETTE[i % len(HALL_PALETTE)]
+        _draw_hall_zone(fig, hx, hy, hall_name, halls[hall_name], hall_dims[hall_name], dc_id, color=palette_color)
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="#F8F9FC",
-        plot_bgcolor="#F8F9FC",
+        paper_bgcolor="#E2E8F0",
+        plot_bgcolor="#E2E8F0",
         xaxis=dict(
             range=[-FLOOR_PAD / 2, total_w],
             showgrid=False, zeroline=False, visible=False,

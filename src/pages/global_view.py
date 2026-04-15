@@ -330,11 +330,11 @@ def build_3d_rack_overlay(dc_id, dc_name, racks):
                                     dmc.Badge("3D View", size="xs", variant="light", color="teal"),
                                 ]),
                                 dmc.Group(gap="xs", children=[
-                                    dcc.Link(
-                                        dmc.Button("Racks Details", size="xs", variant="light", color="teal",
-                                                   leftSection=DashIconify(icon="solar:server-bold-duotone", width=14)),
-                                        href=f"/datacenter/{dc_id}",
-                                        style={"textDecoration": "none"},
+                                    dmc.Button(
+                                        "Racks Details",
+                                        id={"type": "goto-floor-map-btn", "index": dc_id},
+                                        size="xs", variant="light", color="teal",
+                                        leftSection=DashIconify(icon="solar:server-bold-duotone", width=14),
                                     ),
                                     dmc.Button(
                                         id="close-3d-overlay-btn",
