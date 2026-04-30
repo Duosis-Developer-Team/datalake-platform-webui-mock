@@ -1,7 +1,8 @@
-# Mock UI (APP_MODE=mock) + PostgreSQL auth DB. http://localhost:8050
+# Mock UI (APP_MODE=mock) + PostgreSQL auth DB. http://localhost:8052
 #   docker compose -f docker-compose.mock.yml up -d --build
 # Login: admin / ADMIN_DEFAULT_PASSWORD (default Admin123!) unless AUTH_DISABLED=true.
 #
+# Port 8052 avoids clashing with Datalake-Platform-GUI app on 8050.
 # Auth DB host port 5434 avoids clashing with Datalake-Platform-GUI auth-db on 5433.
 
 services:
@@ -29,7 +30,7 @@ services:
         APP_BUILD_ID: ${APP_BUILD_ID:-local}
     container_name: datalake-webui-mock
     ports:
-      - "8050:8050"
+      - "8052:8050"
     environment:
       APP_BUILD_ID: ${APP_BUILD_ID:-local}
       APP_MODE: mock

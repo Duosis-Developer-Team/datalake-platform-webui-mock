@@ -1,3 +1,4 @@
+from __future__ import annotations
 # DC Detail view - Capacity Planning
 # Tab hierarchy: Summary | Virtualization (Classic / Hyperconverged / Power) | Backup | Physical Inventory
 import json
@@ -22,10 +23,12 @@ from src.components.charts import (
     create_usage_donut_chart,
     create_avg_max_donut_chart,
     create_gauge_chart,
+    create_premium_gauge_chart,
+    create_premium_gauge_with_avg,
     create_dual_line_chart,
     create_sparkline_chart,
 )
-from src.components.charts import create_horizontal_bar_chart, create_capacity_area_chart, create_grouped_bar_chart
+from src.components.charts import create_horizontal_bar_chart, create_premium_horizontal_bar_chart, create_capacity_area_chart, create_grouped_bar_chart, create_storage_breakdown_chart
 from src.components.header import create_detail_header
 from src.components.s3_panel import build_dc_s3_panel
 from src.components.backup_panel import (
@@ -45,6 +48,70 @@ from src.utils.export_helpers import (
     dash_send_csv_bytes,
 )
 
+
+# ---------------------------------------------------------------------------
+# KPI Icon Standard — one icon per concept
+# ---------------------------------------------------------------------------
+
+_DC_ICONS: dict[str, str] = {
+    # ── Compute / Hosts ───────────────────────────────────────────────────────
+    "hosts":             "solar:server-bold-duotone",              # rack server        ✓
+    "ibm_hosts":         "solar:server-square-bold-duotone",       # IBM-style server   ✓
+    "vms":               "solar:laptop-bold-duotone",              # virtual machine    ✓
+    "lpars":             "solar:layers-minimalistic-bold-duotone", # logical partitions ✓
+    "vios":              "solar:settings-bold-duotone",            # system service     ✓
+    "clusters":          "solar:chart-2-bold-duotone",
+    "platforms":         "solar:layers-minimalistic-bold-duotone",
+
+    # ── CPU / RAM / Storage ───────────────────────────────────────────────────
+    # solar:ram-bold-duotone & solar:storage-bold-duotone don't exist in Iconify CDN
+    "cpu":               "solar:cpu-bold-duotone",                 # CPU chip           ✓
+    "ram":               "solar:widget-4-bold-duotone",            # memory grid/blocks ✓
+    "storage":           "solar:cloud-storage-bold-duotone",
+    "storage_systems":   "solar:database-bold-duotone",            # DB stack = storage system  ✓
+    "disk":              "solar:chart-bold-duotone",
+
+    # ── Network / Ports ───────────────────────────────────────────────────────
+    # solar:port-bold-duotone doesn't exist in Iconify CDN
+    # total_devices=server distinguishes it from manufacturers=buildings on Physical Inventory tab
+    "total_devices":     "solar:server-bold-duotone",              # device = server    ✓
+    "active_ports":      "solar:bolt-circle-bold-duotone",         # active = energized ✓
+    "total_ports":       "solar:link-bold-duotone",                 # link = port connections    ✓
+    "no_link_ports":     "solar:close-circle-bold-duotone",        # X = no connection  ✓
+    "disabled_ports":    "solar:pause-circle-bold-duotone",        # paused/disabled    ✓
+    "licensed_ports":    "solar:ticket-bold-duotone",              # license ticket     ✓
+    "port_availability": "solar:graph-bold-duotone",               # availability graph ✓
+
+    # ── Energy / Power ────────────────────────────────────────────────────────
+    # All 6 visible on screen at once → 6 distinct confirmed icons
+    "ibm_power_kw":      "material-symbols:power-rounded",         # power button       ✓
+    "vcenter_kw":        "material-symbols:cloud",                 # cloud (vCenter)    ✓
+    "total_kw":          "material-symbols:flash-on",              # lightning = total  ✓
+    "ibm_kwh":           "material-symbols:bolt-outline",          # bolt = energy      ✓
+    "vcenter_kwh":       "solar:cloud-storage-bold-duotone",       # cloud energy       ✓
+    "total_kwh":         "solar:chart-2-bold-duotone",             # aggregate chart    ✓
+
+    # ── Physical Inventory ────────────────────────────────────────────────────
+    # All 4 visible at once → 4 distinct icons
+    # total_devices=server, device_roles=widget-4, top_role=graph, manufacturers=buildings
+    "device_roles":      "solar:widget-4-bold-duotone",            # role grid          ✓
+    "top_role":          "solar:graph-bold-duotone",               # top = highest bar  ✓
+    "manufacturers":     "solar:buildings-bold-duotone",           # factory/buildings  ✓
+
+    # ── Storage subtab (IBM Storage) — all 4 on screen at once ───────────────
+    # storage_systems=database, total_capacity=chart-2, used_capacity=chart-bold, utilization=graph-bold
+    "total_capacity":    "solar:chart-2-bold-duotone",             # aggregate total    ✓ (distinct from storage_systems=database)
+    "used_capacity":     "solar:chart-bold-duotone",               # bar = used amount  ✓
+    "utilization":       "solar:graph-bold-duotone",               # line graph %       ✓
+
+    # ── IBM Power summary (all visible together on Summary tab) ───────────────
+    # Summary tab: ibm_hosts=server-square, lpars=layers-minimalistic, ram_assigned=database, ibm_storage=chart-bold
+    # Energy section also on Summary: power-rounded, cloud, flash-on, bolt-outline, cloud-storage, chart-2
+    # ram_assigned=database and ibm_storage=chart-bold are the only unique ones not reused on that page
+    "ram_assigned":      "solar:database-bold-duotone",            # memory/data store  ✓ (distinct from lpars=layers)
+    "ibm_storage":       "solar:chart-bold-duotone",               # IBM storage bar    ✓ (distinct from vcenter_kwh=cloud-storage)
+    "last_updated":      "solar:clock-circle-bold-duotone",        # clock              ✓
+}
 
 # ---------------------------------------------------------------------------
 # Shared UI helpers
@@ -493,26 +560,48 @@ def _has_power_data(d: dict | None) -> bool:
     return any(d.get(k) not in (None, 0, 0.0, "") for k in keys)
 
 
-def _kpi(title: str, value, icon: str, color: str = "indigo", is_text: bool = False):
+def _kpi(title: str, value, icon: str, color: str = "indigo", is_text: bool = False, stagger: int = 1):
     """Standard KPI card used across all tabs."""
     return html.Div(
-        className="nexus-card",
-        style={"padding": "20px", "display": "flex", "alignItems": "center", "justifyContent": "space-between"},
+        className=f"nexus-card dc-kpi-card dc-stagger-{stagger}",
+        style={
+            "padding": "20px",
+            "display": "flex",
+            "alignItems": "center",
+            "justifyContent": "space-between",
+        },
         children=[
             html.Div([
-                html.Span(title, style={"color": "#A3AED0", "fontSize": "0.9rem", "fontWeight": 500}),
+                html.Span(
+                    title,
+                    style={
+                        "color": "#A3AED0",
+                        "fontSize": "0.82rem",
+                        "fontWeight": 500,
+                        "letterSpacing": "0.02em",
+                        "textTransform": "uppercase",
+                    },
+                ),
                 html.H3(
                     str(value),
                     style={
                         "color": "#2B3674",
-                        "fontSize": "1.1rem" if is_text else "1.5rem",
-                        "margin": "4px 0 0 0",
+                        "fontSize": "1.1rem" if is_text else "1.6rem",
+                        "fontWeight": 900,
+                        "margin": "6px 0 0 0",
+                        "letterSpacing": "-0.02em",
                     },
                 ),
             ]),
             dmc.ThemeIcon(
-                size="xl", radius="md", variant="light", color=color,
-                children=DashIconify(icon=icon, width=24),
+                size=48,
+                radius="xl",
+                variant="light",
+                color=color,
+                style={
+                    "background": "linear-gradient(135deg, rgba(67, 24, 255, 0.08) 0%, rgba(5, 205, 153, 0.08) 100%)",
+                },
+                children=DashIconify(icon=icon, width=26),
             ),
         ],
     )
@@ -520,20 +609,76 @@ def _kpi(title: str, value, icon: str, color: str = "indigo", is_text: bool = Fa
 
 def _chart_card(graph_component):
     return html.Div(
-        className="nexus-card",
-        style={"padding": "16px", "height": "250px", "display": "flex",
-               "flexDirection": "column", "alignItems": "center",
-               "justifyContent": "center", "overflow": "hidden"},
+        className="nexus-card dc-chart-card",
+        style={
+            "padding": "16px",
+            "height": "250px",
+            "display": "flex",
+            "flexDirection": "column",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "overflow": "hidden",
+        },
         children=graph_component,
+    )
+
+
+def _has_value(*values) -> bool:
+    """Return True if at least one value is meaningfully non-zero."""
+    for v in values:
+        try:
+            if float(v or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
+
+
+def _dynamic_chart_grid(items: list, spacing: str = "lg") -> html.Div | None:
+    """
+    Accept (has_data: bool, graph_component) pairs — render only where has_data is True.
+
+    - 0 visible  → None  (caller should hide the entire section)
+    - 1 visible  → cols=1 (full-width single card)
+    - 2 visible  → cols=2
+    - 3+ visible → cols=3
+    """
+    visible = [graph_comp for has_data, graph_comp in items if has_data]
+    if not visible:
+        return None
+    cols = min(len(visible), 3)
+    return dmc.SimpleGrid(
+        cols=cols,
+        spacing=spacing,
+        style={"marginTop": "12px"},
+        children=[_chart_card(g) for g in visible],
     )
 
 
 def _section_title(title: str, subtitle: str | None = None):
     return html.Div(
+        className="dc-section-title",
         style={"marginBottom": "4px"},
         children=[
-            html.H3(title, style={"margin": 0, "color": "#2B3674", "fontSize": "1rem", "fontWeight": 700}),
-            html.P(subtitle, style={"margin": "2px 0 0 0", "color": "#A3AED0", "fontSize": "0.8rem"}) if subtitle else None,
+            html.H3(
+                title,
+                style={
+                    "margin": 0,
+                    "color": "#2B3674",
+                    "fontSize": "1.05rem",
+                    "fontWeight": 800,
+                    "letterSpacing": "-0.01em",
+                },
+            ),
+            html.P(
+                subtitle,
+                style={
+                    "margin": "4px 0 0 0",
+                    "color": "#A3AED0",
+                    "fontSize": "0.8rem",
+                    "fontWeight": 500,
+                },
+            ) if subtitle else None,
         ],
     )
 
@@ -542,14 +687,56 @@ def _capacity_metric_row(label: str, cap_val, used_val, pct: float, unit_fn=None
     """Renders a capacity / allocated / utilisation trio inside a card row."""
     cap_str  = unit_fn(cap_val)  if unit_fn else str(cap_val)
     used_str = unit_fn(used_val) if unit_fn else str(used_val)
+    pct_color = "#05CD99" if pct < 60 else "#FFB547" if pct < 80 else "#EE5D50"
     return html.Div(
-        style={"display": "flex", "justifyContent": "space-between", "alignItems": "center",
-               "padding": "8px 0", "borderBottom": "1px solid #F4F7FE"},
+        className="dc-capacity-row",
+        style={
+            "display": "flex",
+            "justifyContent": "space-between",
+            "alignItems": "center",
+            "borderBottom": "1px solid #F4F7FE",
+        },
         children=[
-            html.Span(label, style={"color": "#2B3674", "fontWeight": 600, "fontSize": "0.85rem", "minWidth": "100px"}),
+            html.Span(
+                label,
+                style={
+                    "color": "#2B3674",
+                    "fontWeight": 700,
+                    "fontSize": "0.85rem",
+                    "minWidth": "120px",
+                },
+            ),
             html.Span(f"Capacity: {cap_str}", style={"color": "#A3AED0", "fontSize": "0.8rem"}),
-            html.Span(f"Allocated: {used_str}", style={"color": "#4318FF", "fontSize": "0.8rem", "fontWeight": 600}),
-            dmc.Badge(f"{pct:.1f}%", color="indigo" if pct < 80 else "red", variant="light", size="sm"),
+            html.Span(
+                f"Allocated: {used_str}",
+                style={"color": "#4318FF", "fontSize": "0.8rem", "fontWeight": 600},
+            ),
+            dmc.Badge(
+                f"{pct:.1f}%",
+                color="indigo" if pct < 60 else "yellow" if pct < 80 else "red",
+                variant="light",
+                size="sm",
+                style={"minWidth": "60px", "textAlign": "center"},
+            ),
+            html.Div(
+                style={
+                    "width": "80px",
+                    "height": "6px",
+                    "borderRadius": "3px",
+                    "background": "#EEF2FF",
+                    "overflow": "hidden",
+                    "marginLeft": "8px",
+                },
+                children=html.Div(
+                    style={
+                        "width": f"{min(pct, 100):.1f}%",
+                        "height": "100%",
+                        "borderRadius": "3px",
+                        "background": f"linear-gradient(90deg, #4318FF 0%, {pct_color} 100%)",
+                        "transition": "width 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)",
+                    },
+                ),
+            ),
         ],
     )
 
@@ -583,33 +770,33 @@ def _build_compute_tab(compute: dict, title: str, color: str = "indigo", is_powe
         children=[
             # KPI row
             dmc.SimpleGrid(cols=4, spacing="lg", children=[
-                _kpi("Total Hosts", f"{hosts:,}", "solar:server-bold-duotone", color=color),
-                _kpi("Total VMs / LPARs", f"{vms:,}", "solar:laptop-bold-duotone", color=color),
-                _kpi("CPU Capacity",  smart_cpu(cpu_cap),  "solar:cpu-bold-duotone",   color=color, is_text=True),
-                _kpi("RAM Capacity",  smart_memory(mem_cap), "solar:ram-bold-duotone", color=color, is_text=True),
+                _kpi("Total Hosts", f"{hosts:,}", _DC_ICONS["hosts"], color=color),
+                _kpi("Total VMs / LPARs", f"{vms:,}", _DC_ICONS["vms"], color=color),
+                _kpi("CPU Capacity",  smart_cpu(cpu_cap),  _DC_ICONS["cpu"],   color=color, is_text=True),
+                _kpi("RAM Capacity",  smart_memory(mem_cap), _DC_ICONS["ram"], color=color, is_text=True),
             ]),
-            # Donut charts
-            dmc.SimpleGrid(cols=3, spacing="lg", children=[
-                _chart_card(dcc.Graph(
+            # Donut charts — only shown when capacity data exists (None → DMC ignores)
+            _dynamic_chart_grid([
+                (_has_value(cpu_cap), dcc.Graph(
                     figure=(
-                        create_avg_max_donut_chart(cpu_pct, cpu_pct_max, "CPU Usage (peak)")
+                        create_premium_gauge_with_avg(cpu_pct, cpu_pct_max, "CPU Usage (peak)", color="#4318FF")
                         if cpu_pct_max > 0
-                        else create_usage_donut_chart(cpu_pct, "CPU Usage")
+                        else create_premium_gauge_chart(cpu_pct, "CPU Usage", color="#4318FF")
                     ),
                     config={"displayModeBar": False},
                     style={"height": "100%", "width": "100%"},
                 )),
-                _chart_card(dcc.Graph(
+                (_has_value(mem_cap), dcc.Graph(
                     figure=(
-                        create_avg_max_donut_chart(mem_pct, mem_pct_max, "RAM Usage (peak)")
+                        create_premium_gauge_with_avg(mem_pct, mem_pct_max, "RAM Usage (peak)", color="#05CD99")
                         if mem_pct_max > 0
-                        else create_usage_donut_chart(mem_pct, "RAM Usage")
+                        else create_premium_gauge_chart(mem_pct, "RAM Usage", color="#05CD99")
                     ),
                     config={"displayModeBar": False},
                     style={"height": "100%", "width": "100%"},
                 )),
-                _chart_card(dcc.Graph(
-                    figure=create_usage_donut_chart(stor_pct, "Storage Usage"),
+                (_has_value(stor_cap), dcc.Graph(
+                    figure=create_premium_gauge_chart(stor_pct, "Storage Usage", color="#FFB547"),
                     config={"displayModeBar": False},
                     style={"height": "100%", "width": "100%"},
                 )),
@@ -673,18 +860,18 @@ def _build_power_tab(
         gap="lg",
         children=[
             dmc.SimpleGrid(cols=4, spacing="lg", children=[
-                _kpi("IBM Hosts",   f"{hosts:,}", "solar:server-bold-duotone",        color="grape"),
-                _kpi("VIOS",        f"{vios:,}",  "solar:server-square-bold-duotone",  color="grape"),
-                _kpi("LPARs",       f"{lpars:,}", "solar:laptop-bold-duotone",          color="grape"),
-                _kpi("Last Updated", "Live",       "solar:clock-circle-bold-duotone",   color="grape", is_text=True),
+                _kpi("IBM Hosts",   f"{hosts:,}", _DC_ICONS["ibm_hosts"],   color="grape"),
+                _kpi("VIOS",        f"{vios:,}",  _DC_ICONS["vios"],        color="grape"),
+                _kpi("LPARs",       f"{lpars:,}", _DC_ICONS["lpars"],       color="grape"),
+                _kpi("Last Updated", "Live",       _DC_ICONS["last_updated"], color="grape", is_text=True),
             ]),
-            dmc.SimpleGrid(cols=2, spacing="lg", children=[
-                _chart_card(dcc.Graph(
+            _dynamic_chart_grid([
+                (_has_value(mem_total), dcc.Graph(
                     figure=create_gauge_chart(mem_assigned, mem_total or 1, "Memory Assigned", color="#05CD99"),
                     config={"displayModeBar": False},
                     style={"height": "100%", "width": "100%"},
                 )),
-                _chart_card(dcc.Graph(
+                (_has_value(cpu_assigned), dcc.Graph(
                     figure=create_gauge_chart(cpu_used, cpu_assigned, "CPU Used", color="#4318FF"),
                     config={"displayModeBar": False},
                     style={"height": "100%", "width": "100%"},
@@ -897,8 +1084,8 @@ def _build_power_tab(
                 children=[
                     _section_title("Energy", "Daily average over report period"),
                     dmc.SimpleGrid(cols=2, spacing="lg", style={"marginTop": "12px"}, children=[
-                        _kpi("IBM Power", f"{energy.get('ibm_kw', 0):.1f} kW",  "material-symbols:bolt-outline", color="orange"),
-                        _kpi("Consumption", f"{energy.get('ibm_kwh', 0):,.0f} kWh", "material-symbols:bolt-outline", color="orange"),
+                        _kpi("IBM Power", f"{energy.get('ibm_kw', 0):.1f} kW",  _DC_ICONS["ibm_power_kw"], color="orange"),
+                        _kpi("Consumption", f"{energy.get('ibm_kwh', 0):,.0f} kWh", _DC_ICONS["ibm_kwh"], color="orange"),
                     ]),
                 ],
             ),
@@ -1043,10 +1230,10 @@ def _build_san_subtab(port_usage: dict, health_alerts: list[dict], traffic_trend
                         spacing="lg",
                         style={"marginTop": "12px"},
                         children=[
-                            _kpi("Active Ports", f"{active_ports:,}", "solar:signal-bold-duotone", color="indigo"),
-                            _kpi("No Link / Offline Ports", f"{no_link_ports:,}", "solar:port-bold-duotone", color="indigo"),
-                            _kpi("Admin Disabled Ports", f"{disabled_ports:,}", "solar:pause-circle-bold-duotone", color="indigo"),
-                            _kpi("Licensed Ports", f"{licensed_ports:,}", "solar:ticket-bold-duotone", color="indigo"),
+                            _kpi("Active Ports", f"{active_ports:,}", _DC_ICONS["active_ports"], color="indigo"),
+                            _kpi("No Link / Offline Ports", f"{no_link_ports:,}", _DC_ICONS["no_link_ports"], color="indigo"),
+                            _kpi("Admin Disabled Ports", f"{disabled_ports:,}", _DC_ICONS["disabled_ports"], color="indigo"),
+                            _kpi("Licensed Ports", f"{licensed_ports:,}", _DC_ICONS["licensed_ports"], color="indigo"),
                         ],
                     ),
                     dmc.SimpleGrid(
@@ -1059,7 +1246,7 @@ def _build_san_subtab(port_usage: dict, health_alerts: list[dict], traffic_trend
                                 children=[
                                     _chart_card(
                                         dcc.Graph(
-                                            figure=create_usage_donut_chart(licensed_pct, "Pod License ROI", color="#4318FF"),
+                                            figure=create_premium_gauge_chart(licensed_pct, "Pod License ROI", color="#4318FF"),
                                             config={"displayModeBar": False},
                                             style={"height": "100%", "width": "100%"},
                                         )
@@ -1075,7 +1262,7 @@ def _build_san_subtab(port_usage: dict, health_alerts: list[dict], traffic_trend
                                 children=[
                                     _chart_card(
                                         dcc.Graph(
-                                            figure=create_usage_donut_chart(active_pct, "Active vs Licensed", color="#05CD99"),
+                                            figure=create_premium_gauge_chart(active_pct, "Active vs Licensed", color="#05CD99"),
                                             config={"displayModeBar": False},
                                             style={"height": "100%", "width": "100%"},
                                         )
@@ -1091,7 +1278,7 @@ def _build_san_subtab(port_usage: dict, health_alerts: list[dict], traffic_trend
                                 children=[
                                     _chart_card(
                                         dcc.Graph(
-                                            figure=create_usage_donut_chart(available_pct, "Port Availability", color="#FFB547"),
+                                            figure=create_premium_gauge_chart(available_pct, "Port Availability", color="#FFB547"),
                                             config={"displayModeBar": False},
                                             style={"height": "100%", "width": "100%"},
                                         )
@@ -1196,37 +1383,41 @@ def _build_summary_tab(data: dict, tr: dict):
                 children=[
                     _section_title("Combined Infrastructure", "All compute types combined"),
                     dmc.SimpleGrid(cols=4, spacing="lg", style={"marginTop": "12px"}, children=[
-                        _kpi("Total Hosts", f"{total_hosts:,}", "solar:server-bold-duotone"),
-                        _kpi("Total VMs / LPARs", f"{total_vms:,}", "solar:laptop-bold-duotone"),
-                        _kpi("CPU Capacity",  smart_cpu(total_cpu_cap),  "solar:cpu-bold-duotone",   is_text=True),
-                        _kpi("RAM Capacity",  smart_memory(total_mem_cap), "solar:ram-bold-duotone", is_text=True),
+                        _kpi("Total Hosts", f"{total_hosts:,}", _DC_ICONS["hosts"]),
+                        _kpi("Total VMs / LPARs", f"{total_vms:,}", _DC_ICONS["vms"]),
+                        _kpi("CPU Capacity",  smart_cpu(total_cpu_cap),  _DC_ICONS["cpu"],   is_text=True),
+                        _kpi("RAM Capacity",  smart_memory(total_mem_cap), _DC_ICONS["ram"], is_text=True),
                     ]),
                 ],
             ),
             # Capacity overview charts
-            html.Div(
-                className="nexus-card",
-                style={"padding": "20px"},
-                children=[
-                    _section_title("Resource Utilization", "Capacity vs. workload allocation (all VMware compute)"),
-                    dmc.SimpleGrid(cols=3, spacing="lg", style={"marginTop": "12px"}, children=[
-                        _chart_card(dcc.Graph(
-                            figure=create_usage_donut_chart(cpu_pct, "CPU Usage"),
-                            config={"displayModeBar": False},
-                            style={"height": "100%", "width": "100%"},
-                        )),
-                        _chart_card(dcc.Graph(
-                            figure=create_usage_donut_chart(mem_pct, "RAM Usage"),
-                            config={"displayModeBar": False},
-                            style={"height": "100%", "width": "100%"},
-                        )),
-                        _chart_card(dcc.Graph(
-                            figure=create_usage_donut_chart(stor_pct, "Storage Usage"),
-                            config={"displayModeBar": False},
-                            style={"height": "100%", "width": "100%"},
-                        )),
-                    ]),
-                ],
+            *(
+                [html.Div(
+                    className="nexus-card",
+                    style={"padding": "20px"},
+                    children=[
+                        _section_title("Resource Utilization", "Capacity vs. workload allocation (all VMware compute)"),
+                        _summary_util_grid,
+                    ],
+                )]
+                if (_summary_util_grid := _dynamic_chart_grid([
+                    (_has_value(total_cpu_cap), dcc.Graph(
+                        figure=create_premium_gauge_chart(cpu_pct, "CPU Usage", color="#4318FF"),
+                        config={"displayModeBar": False},
+                        style={"height": "100%", "width": "100%"},
+                    )),
+                    (_has_value(total_mem_cap), dcc.Graph(
+                        figure=create_premium_gauge_chart(mem_pct, "RAM Usage", color="#05CD99"),
+                        config={"displayModeBar": False},
+                        style={"height": "100%", "width": "100%"},
+                    )),
+                    (_has_value(total_stor_cap), dcc.Graph(
+                        figure=create_premium_gauge_chart(stor_pct, "Storage Usage", color="#FFB547"),
+                        config={"displayModeBar": False},
+                        style={"height": "100%", "width": "100%"},
+                    )),
+                ])) is not None
+                else []
             ),
             # Detailed capacity table
             html.Div(
@@ -1269,16 +1460,19 @@ def _build_summary_tab(data: dict, tr: dict):
             # IBM Power summary
             html.Div(
                 className="nexus-card",
-                style={"padding": "20px"},
+                style={
+                    "padding": "20px",
+                    "background": "linear-gradient(135deg, rgba(139, 92, 246, 0.03) 0%, rgba(67, 24, 255, 0.03) 100%)",
+                },
                 children=[
                     _section_title("Power Compute (IBM)", "IBM Power resource summary"),
                     dmc.SimpleGrid(cols=4, spacing="lg", style={"marginTop": "12px"}, children=[
-                        _kpi("IBM Hosts",   f"{power.get('hosts', 0):,}",       "solar:server-bold-duotone",       color="grape"),
-                        _kpi("LPARs",       f"{power.get('lpar_count', 0):,}",  "solar:laptop-bold-duotone",       color="grape"),
+                        _kpi("IBM Hosts",   f"{power.get('hosts', 0):,}",       _DC_ICONS["ibm_hosts"],  color="grape"),
+                        _kpi("LPARs",       f"{power.get('lpar_count', 0):,}",  _DC_ICONS["lpars"],      color="grape"),
                         _kpi("RAM Assigned", smart_memory(power.get("memory_assigned", 0)),
-                             "solar:ram-bold-duotone", color="grape", is_text=True),
+                             _DC_ICONS["ram_assigned"], color="grape", is_text=True),
                         _kpi("Storage", smart_storage(power.get("storage_cap_tb", 0) * 1024),
-                             "solar:database-bold-duotone", color="grape", is_text=True) if power.get("storage_cap_tb", 0) > 0 else None,
+                             _DC_ICONS["ibm_storage"], color="grape", is_text=True) if power.get("storage_cap_tb", 0) > 0 else None,
                     ]),
                 ],
             ),
@@ -1289,15 +1483,15 @@ def _build_summary_tab(data: dict, tr: dict):
                 children=[
                     _section_title("Energy Breakdown", "Daily average over report period"),
                     dmc.SimpleGrid(cols=3, spacing="lg", style={"marginTop": "12px"}, children=[
-                        _kpi("IBM Power",  f"{energy.get('ibm_kw', 0):.1f} kW",      "material-symbols:bolt-outline", color="orange"),
-                        _kpi("vCenter",    f"{energy.get('vcenter_kw', 0):.1f} kW",   "material-symbols:bolt-outline", color="orange"),
-                        _kpi("Total",      f"{energy.get('total_kw', 0):.1f} kW",     "material-symbols:bolt-outline", color="orange"),
+                        _kpi("IBM Power",  f"{energy.get('ibm_kw', 0):.1f} kW",      _DC_ICONS["ibm_power_kw"], color="orange", stagger=1),
+                        _kpi("vCenter",    f"{energy.get('vcenter_kw', 0):.1f} kW",   _DC_ICONS["vcenter_kw"],  color="orange", stagger=2),
+                        _kpi("Total",      f"{energy.get('total_kw', 0):.1f} kW",     _DC_ICONS["total_kw"],    color="orange", stagger=3),
                     ]),
                     dmc.Divider(style={"margin": "12px 0"}),
                     dmc.SimpleGrid(cols=3, spacing="lg", children=[
-                        _kpi("IBM kWh",    f"{energy.get('ibm_kwh', 0):,.0f} kWh",    "material-symbols:bolt-outline", color="yellow"),
-                        _kpi("vCenter kWh", f"{energy.get('vcenter_kwh', 0):,.0f} kWh", "material-symbols:bolt-outline", color="yellow"),
-                        _kpi("Total kWh",  f"{energy.get('total_kwh', 0):,.0f} kWh",  "material-symbols:bolt-outline", color="yellow"),
+                        _kpi("IBM kWh",    f"{energy.get('ibm_kwh', 0):,.0f} kWh",    _DC_ICONS["ibm_kwh"],    color="yellow"),
+                        _kpi("vCenter kWh", f"{energy.get('vcenter_kwh', 0):,.0f} kWh", _DC_ICONS["vcenter_kwh"], color="yellow"),
+                        _kpi("Total kWh",  f"{energy.get('total_kwh', 0):,.0f} kWh",  _DC_ICONS["total_kwh"],  color="yellow"),
                     ]),
                 ],
             ),
@@ -1314,31 +1508,73 @@ def _build_physical_inventory_dc_tab(phys_inv: dict):
     # Horizontal bar: device_role_name (title-case display)
     role_labels = [title_case(r["role"]) for r in by_role]
     role_counts = [r["count"] for r in by_role]
+
+    # B1. Dynamic chart height
+    dynamic_height = max(340, len(role_labels) * 36)
+
+    # B2. Dynamic left margin based on longest label
+    max_label_len = max((len(l) for l in role_labels), default=10)
+    left_margin = min(max_label_len * 7 + 10, 220)
+
+    # B3. Conditional text position
+    max_count = max(role_counts) if role_counts else 1
+    text_positions = [
+        "inside" if c > max_count * 0.35 else "outside"
+        for c in role_counts
+    ]
+    text_colors = [
+        "white" if c > max_count * 0.35 else "#2B3674"
+        for c in role_counts
+    ]
+
     fig_role = go.Figure(
         data=[go.Bar(
             x=role_counts or [0],
             y=role_labels or ["No data"],
             orientation="h",
-            marker_color="#4318FF",
+            marker=dict(
+                color=role_counts,
+                colorscale=[
+                    [0.0, "#C4B5FD"],
+                    [0.4, "#7551FF"],
+                    [0.7, "#4318FF"],
+                    [1.0, "#05CD99"],
+                ],
+                showscale=False,
+                line=dict(color="rgba(0,0,0,0)", width=0),
+            ),
             text=role_counts,
-            textposition="outside",
-            textfont=dict(size=12, color="#2B3674"),
+            textposition=text_positions,
+            textfont=dict(size=11, family="DM Sans", weight=700, color=text_colors),
+            hovertemplate="<b>%{y}</b><br>%{x:,} devices<extra></extra>",
+            width=0.65,
         )]
     )
+    fig_role.update_traces(marker_cornerradius=8)
     fig_role.update_layout(
-        margin=dict(l=20, r=50, t=10, b=20),
-        height=280,
+        margin=dict(l=left_margin, r=70, t=10, b=10),
+        height=dynamic_height,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
-        xaxis=dict(showgrid=False, zeroline=False),
-        yaxis=dict(showgrid=False, zeroline=False, categoryorder="total ascending"),
-        font=dict(family="DM Sans, sans-serif", color="#A3AED0", size=11),
+        bargap=0.28,
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            range=[0, max(role_counts or [1]) * 1.22],
+        ),
+        yaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            categoryorder="total ascending",
+            tickfont=dict(family="DM Sans", size=12, color="#2B3674"),
+        ),
+        font=dict(family="DM Sans, sans-serif", color="#2B3674", size=12),
     )
 
-    # Grouped bar: per role, manufacturers (subset by role for readability; show top roles)
-    roles_for_rm = list(dict.fromkeys(r["role"] for r in by_rm))[:8]
-    rm_filtered = [r for r in by_rm if r["role"] in roles_for_rm]
+    # Horizontal stacked bar: Y=role, X=count, color=manufacturer
+    rm_filtered = list(by_rm)
     if not rm_filtered:
         fig_rm = go.Figure()
         fig_rm.update_layout(
@@ -1349,34 +1585,90 @@ def _build_physical_inventory_dc_tab(phys_inv: dict):
             annotations=[dict(text="No role/manufacturer data", x=0.5, y=0.5, showarrow=False, font=dict(size=14))],
         )
     else:
-        # Pivot: x = manufacturer (per role), y = count; group by role
-        role_to_manu = {}
+        # Top 8 manufacturers by total count
+        manu_totals: dict = {}
         for r in rm_filtered:
-            ro = r["role"]
-            if ro not in role_to_manu:
-                role_to_manu[ro] = []
-            role_to_manu[ro].append((r["manufacturer"], r["count"]))
-        colors = ["#4318FF", "#05CD99", "#FFB547", "#E85347", "#7551FF", "#00D9FF", "#F7B84B", "#0FBA81"]
+            m = title_case(r.get("manufacturer") or "Unknown")
+            manu_totals[m] = manu_totals.get(m, 0) + r["count"]
+        top_manufacturers = [m for m, _ in sorted(manu_totals.items(), key=lambda x: -x[1])[:8]]
+
+        # Top 12 roles by total device count
+        role_totals: dict = {}
+        for r in rm_filtered:
+            role = title_case(r["role"])
+            role_totals[role] = role_totals.get(role, 0) + r["count"]
+        all_roles_rm = [role for role, _ in sorted(role_totals.items(), key=lambda x: -x[1])[:12]]
+
+        colors = ["#4318FF", "#05CD99", "#FFB547", "#7551FF", "#00DBE3",
+                  "#FF6B6B", "#A78BFA", "#0FBA81"]
+
+        # Dynamic left margin based on longest label
+        rm_left = min(max((len(r) for r in all_roles_rm), default=10) * 7 + 10, 240)
+
         fig_rm = go.Figure()
-        for i, (role, pairs) in enumerate(role_to_manu.items()):
-            manu = [title_case(p[0]) for p in pairs]
-            cnts = [p[1] for p in pairs]
+        for i, manu in enumerate(top_manufacturers):
+            x_vals = []
+            for role in all_roles_rm:
+                count = next(
+                    (r["count"] for r in rm_filtered
+                     if title_case(r["role"]) == role and title_case(r.get("manufacturer") or "") == manu),
+                    0
+                )
+                x_vals.append(count)
             fig_rm.add_trace(go.Bar(
-                name=title_case(role),
-                x=manu,
-                y=cnts,
-                marker_color=colors[i % len(colors)],
+                name=manu,
+                y=all_roles_rm,
+                x=x_vals,
+                orientation="h",
+                marker=dict(color=colors[i % len(colors)], opacity=0.92),
+                hovertemplate="<b>%{y}</b><br>" + manu + ": <b>%{x:,} devices</b><extra></extra>",
             ))
+
+        try:
+            fig_rm.update_traces(marker_cornerradius=4)
+        except Exception:
+            pass
+
+        rm_height = max(360, len(all_roles_rm) * 38)
         fig_rm.update_layout(
-            barmode="group",
-            margin=dict(l=20, r=20, t=30, b=80),
-            height=320,
+            barmode="stack",
+            bargap=0.25,
+            margin=dict(l=rm_left, r=20, t=10, b=60),
+            height=rm_height,
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             showlegend=True,
-            legend=dict(orientation="h", yanchor="top", y=1.08),
-            xaxis=dict(showgrid=False, zeroline=False, tickangle=-35),
-            yaxis=dict(showgrid=False, zeroline=False),
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.12,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=11, family="DM Sans", color="#2B3674"),
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="rgba(227,234,252,0.8)",
+                borderwidth=1,
+                itemsizing="constant",
+            ),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(227, 234, 252, 0.5)",
+                gridwidth=1,
+                zeroline=False,
+                tickfont=dict(family="DM Sans", size=11, color="#A3AED0"),
+            ),
+            yaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                categoryorder="total ascending",
+                tickfont=dict(family="DM Sans", size=12, color="#2B3674", weight=600),
+                automargin=True,
+            ),
+            hoverlabel=dict(
+                bgcolor="rgba(255,255,255,0.97)",
+                bordercolor="rgba(67,24,255,0.15)",
+                font=dict(family="DM Sans", size=12, color="#2B3674"),
+            ),
             font=dict(family="DM Sans, sans-serif", color="#A3AED0", size=11),
         )
 
@@ -1388,8 +1680,11 @@ def _build_physical_inventory_dc_tab(phys_inv: dict):
                 style={"padding": "20px"},
                 children=[
                     _section_title("Physical Inventory", "NetBox devices in this DC"),
-                    dmc.SimpleGrid(cols=1, spacing="lg", style={"marginTop": "12px"}, children=[
-                        _kpi("Total Devices", f"{total:,}", "solar:server-bold-duotone", color="indigo"),
+                    dmc.SimpleGrid(cols=4, spacing="lg", style={"marginTop": "12px"}, children=[
+                        _kpi("Total Devices", f"{total:,}", _DC_ICONS["total_devices"], color="indigo", stagger=1),
+                        _kpi("Device Roles", f"{len(by_role):,}", _DC_ICONS["device_roles"], color="violet", stagger=2),
+                        _kpi("Top Role", title_case(by_role[0]["role"]) if by_role else "—", _DC_ICONS["top_role"], color="grape", is_text=True, stagger=3),
+                        _kpi("Manufacturers", f"{len(set(r['manufacturer'] for r in by_rm)) if by_rm else 0}", _DC_ICONS["manufacturers"], color="teal", stagger=4),
                     ]),
                 ],
             ),
@@ -1398,15 +1693,22 @@ def _build_physical_inventory_dc_tab(phys_inv: dict):
                 style={"padding": "20px"},
                 children=[
                     _section_title("Devices by Role", "Device role distribution"),
-                    dcc.Graph(figure=fig_role, config={"displayModeBar": False}, style={"height": "280px"}),
+                    html.Div(
+                        style={"overflowY": "auto", "maxHeight": "480px"},
+                        children=dcc.Graph(
+                            figure=fig_role,
+                            config={"displayModeBar": False},
+                            style={"height": f"{dynamic_height}px"},
+                        ),
+                    ),
                 ],
             ),
             html.Div(
                 className="nexus-card",
                 style={"padding": "20px"},
                 children=[
-                    _section_title("Manufacturer by Role", "Per device role, manufacturer breakdown"),
-                    dcc.Graph(figure=fig_rm, config={"displayModeBar": False}, style={"height": "320px"}),
+                    _section_title("Manufacturer by Role", "Stacked by manufacturer, sorted by total devices"),
+                    dcc.Graph(figure=fig_rm, config={"displayModeBar": False}, style={"height": f"{rm_height}px"}),
                 ],
             ),
         ],
@@ -1481,27 +1783,27 @@ def _build_network_dashboard_subtab(net_filters: dict, port_summary: dict, perce
         cols=4,
         spacing="lg",
         children=[
-            _kpi("Total Devices", f"{device_count:,}", "solar:server-bold-duotone", color="indigo"),
-            _kpi("Active Ports", f"{active_ports:,}", "solar:signal-bold-duotone", color="indigo"),
-            _kpi("Total Ports", f"{total_ports:,}", "solar:port-bold-duotone", color="indigo"),
-            _kpi("Port Availability", f"{port_availability_pct:.1f}%", "solar:graph-bold-duotone", color="indigo"),
+            _kpi("Total Devices", f"{device_count:,}", _DC_ICONS["total_devices"], color="indigo", stagger=1),
+            _kpi("Active Ports", f"{active_ports:,}", _DC_ICONS["active_ports"], color="indigo", stagger=2),
+            _kpi("Total Ports", f"{total_ports:,}", _DC_ICONS["total_ports"], color="indigo", stagger=3),
+            _kpi("Port Availability", f"{port_availability_pct:.1f}%", _DC_ICONS["port_availability"], color="indigo", stagger=4),
         ],
     )
 
     # Donut charts (initial)
-    donut_active = create_usage_donut_chart(port_availability_pct, "Port Availability", color="#FFB547")
-    donut_util = create_usage_donut_chart(overall_util_pct, "Port Utilization", color="#05CD99")
-    donut_icmp = create_usage_donut_chart(icmp_availability_pct, "ICMP Availability", color="#4318FF")
+    donut_active = create_premium_gauge_chart(port_availability_pct, "Port Availability", color="#FFB547")
+    donut_util = create_premium_gauge_chart(overall_util_pct, "Port Utilization", color="#05CD99")
+    donut_icmp = create_premium_gauge_chart(icmp_availability_pct, "ICMP Availability", color="#4318FF")
 
     top_interfaces = percentile_data.get("top_interfaces") or []
     bar_labels = [(t.get("interface_name") or "").strip() or "Unknown" for t in top_interfaces]
     bar_values = [_bps_to_gbps(t.get("p95_total_bps")) for t in top_interfaces]
-    bar_fig = create_horizontal_bar_chart(
+    bar_fig = create_premium_horizontal_bar_chart(
         labels=bar_labels,
         values=bar_values,
         title="Top 95th Percentile Interfaces (Gbps)",
-        color="#4318FF",
-        height=320,
+        unit_suffix="Gbps",
+        height=360,
     )
 
     # Interface table (initial page=1)
@@ -1536,19 +1838,30 @@ def _build_network_dashboard_subtab(net_filters: dict, port_summary: dict, perce
         sort_action="native",
         style_table={"overflowX": "auto", "marginTop": "6px"},
         style_cell={
-            "padding": "8px",
+            "padding": "10px 14px",
             "color": "#2B3674",
             "fontFamily": "DM Sans, sans-serif",
-            "fontSize": "12px",
-            "borderColor": "#E9ECEF",
+            "fontSize": "0.82rem",
+            "borderColor": "#F4F7FE",
+            "fontWeight": 500,
         },
         style_header={
-            "backgroundColor": "#F4F7FE",
-            "color": "#2B3674",
+            "backgroundColor": "#F8F9FC",
+            "color": "#A3AED0",
             "fontWeight": 700,
             "fontFamily": "DM Sans, sans-serif",
-            "fontSize": "12px",
+            "fontSize": "0.72rem",
+            "textTransform": "uppercase",
+            "letterSpacing": "0.05em",
+            "borderBottom": "2px solid #E9EDF7",
         },
+        style_data_conditional=[
+            {
+                "if": {"state": "active"},
+                "backgroundColor": "rgba(67, 24, 255, 0.04)",
+                "border": "1px solid rgba(67, 24, 255, 0.1)",
+            },
+        ],
     )
 
     return dmc.Stack(
@@ -1603,7 +1916,7 @@ def _build_network_dashboard_subtab(net_filters: dict, port_summary: dict, perce
                             id="net-donut-active-ports",
                             figure=donut_active,
                             config={"displayModeBar": False},
-                            style={"height": "180px"},
+                            style={"height": "100%", "width": "100%"},
                         )
                     ),
                     _chart_card(
@@ -1611,7 +1924,7 @@ def _build_network_dashboard_subtab(net_filters: dict, port_summary: dict, perce
                             id="net-donut-utilization",
                             figure=donut_util,
                             config={"displayModeBar": False},
-                            style={"height": "180px"},
+                            style={"height": "100%", "width": "100%"},
                         )
                     ),
                     _chart_card(
@@ -1619,7 +1932,7 @@ def _build_network_dashboard_subtab(net_filters: dict, port_summary: dict, perce
                             id="net-donut-icmp",
                             figure=donut_icmp,
                             config={"displayModeBar": False},
-                            style={"height": "180px"},
+                            style={"height": "100%", "width": "100%"},
                         )
                     ),
                 ],
@@ -1703,10 +2016,86 @@ def _build_intel_storage_subtab(device_list: list[dict], zabbix_storage_capacity
     used_pct = pct_float(used_gb, total_gb)
     free_pct = max(0.0, 100.0 - used_pct)
 
-    # Donuts
-    donut_total = create_usage_donut_chart(100.0, f"Total {smart_storage(total_gb)}", color="#FFB547")
-    donut_used = create_usage_donut_chart(used_pct, "Used Capacity", color="#4318FF")
-    donut_free = create_usage_donut_chart(free_pct, "Free Capacity", color="#05CD99")
+    # Capacity info card (replaces gauge — total is not a ratio)
+    _bar_w = f"{min(used_pct, 100):.1f}%"
+    _bar_color = "#FFB547" if used_pct < 75 else "#EE5D50" if used_pct >= 90 else "#FF8C00"
+    total_capacity_card = html.Div(
+        className="nexus-card dc-chart-card",
+        style={
+            "padding": "24px 28px",
+            "height": "250px",
+            "display": "flex",
+            "flexDirection": "column",
+            "justifyContent": "center",
+            "gap": "16px",
+            "overflow": "hidden",
+            "boxSizing": "border-box",
+        },
+        children=[
+            # Header row
+            html.Div(
+                style={"display": "flex", "alignItems": "center", "gap": "10px"},
+                children=[
+                    html.Div(
+                        style={
+                            "width": "36px", "height": "36px", "borderRadius": "10px",
+                            "background": "rgba(255,181,71,0.12)",
+                            "display": "flex", "alignItems": "center", "justifyContent": "center",
+                            "flexShrink": 0,
+                        },
+                        children=DashIconify(icon="solar:database-bold-duotone", width=20, color="#FFB547"),
+                    ),
+                    html.Div([
+                        html.Div("TOTAL CAPACITY", style={
+                            "fontSize": "0.62rem", "fontWeight": 700, "color": "#A3AED0",
+                            "letterSpacing": "0.08em", "marginBottom": "2px",
+                        }),
+                        html.Div(smart_storage(total_gb), style={
+                            "fontSize": "1.75rem", "fontWeight": 900, "color": "#2B3674",
+                            "letterSpacing": "-0.03em", "lineHeight": 1,
+                            "fontVariantNumeric": "tabular-nums",
+                        }),
+                    ]),
+                ],
+            ),
+            # Usage bar
+            html.Div([
+                html.Div(
+                    style={"display": "flex", "justifyContent": "space-between", "marginBottom": "6px"},
+                    children=[
+                        html.Span("Utilization", style={"fontSize": "0.68rem", "fontWeight": 600, "color": "#A3AED0"}),
+                        html.Span(f"{used_pct:.1f}%", style={"fontSize": "0.68rem", "fontWeight": 800, "color": _bar_color}),
+                    ],
+                ),
+                html.Div(
+                    style={"height": "6px", "borderRadius": "4px", "background": "#EEF2FF", "overflow": "hidden"},
+                    children=html.Div(style={
+                        "width": _bar_w, "height": "100%", "borderRadius": "4px",
+                        "background": f"linear-gradient(90deg, #FFB547 0%, {_bar_color} 100%)",
+                    }),
+                ),
+            ]),
+            # Used / Free row
+            html.Div(
+                style={"display": "flex", "gap": "16px"},
+                children=[
+                    html.Div([
+                        html.Div("Used", style={"fontSize": "0.62rem", "fontWeight": 700, "color": "#A3AED0", "letterSpacing": "0.06em"}),
+                        html.Div(smart_storage(used_gb), style={"fontSize": "0.95rem", "fontWeight": 800, "color": "#2B3674", "fontVariantNumeric": "tabular-nums"}),
+                    ]),
+                    html.Div(style={"width": "1px", "background": "rgba(227,234,252,0.8)", "alignSelf": "stretch"}),
+                    html.Div([
+                        html.Div("Free", style={"fontSize": "0.62rem", "fontWeight": 700, "color": "#A3AED0", "letterSpacing": "0.06em"}),
+                        html.Div(smart_storage(free_gb), style={"fontSize": "0.95rem", "fontWeight": 800, "color": "#05CD99", "fontVariantNumeric": "tabular-nums"}),
+                    ]),
+                ],
+            ),
+        ],
+    )
+
+    # Gauges
+    donut_used = create_premium_gauge_chart(used_pct, "Used Capacity", color="#4318FF")
+    donut_free = create_premium_gauge_chart(free_pct, "Free Capacity", color="#05CD99")
 
     # Trend
     series = zabbix_storage_trend.get("series") or []
@@ -1718,7 +2107,7 @@ def _build_intel_storage_subtab(device_list: list[dict], zabbix_storage_capacity
         used=used_series,
         total=total_series,
         title="Capacity Utilization Trend",
-        height=260,
+        height=300,
     )
 
     disk_container = html.Div(
@@ -1741,21 +2130,25 @@ def _build_intel_storage_subtab(device_list: list[dict], zabbix_storage_capacity
                     dcc.Store(id="intel-storage-device-store", data=None),
                 ],
             ),
-            dmc.SimpleGrid(
-                cols=3,
-                spacing="lg",
-                children=[
-                    _chart_card(dcc.Graph(id="intel-donut-total", figure=donut_total, config={"displayModeBar": False})),
-                    _chart_card(dcc.Graph(id="intel-donut-used", figure=donut_used, config={"displayModeBar": False})),
-                    _chart_card(dcc.Graph(id="intel-donut-free", figure=donut_free, config={"displayModeBar": False})),
-                ],
+            *(
+                [dmc.SimpleGrid(
+                    cols=_intel_cols,
+                    spacing="lg",
+                    children=_intel_cards,
+                )]
+                if (_intel_cards := list(filter(None, [
+                    total_capacity_card if total_bytes > 0 else None,
+                    _chart_card(dcc.Graph(id="intel-donut-used", figure=donut_used, config={"displayModeBar": False})) if used_bytes > 0 else None,
+                    _chart_card(dcc.Graph(id="intel-donut-free", figure=donut_free, config={"displayModeBar": False})) if (total_bytes - used_bytes) > 0 else None,
+                ]))) and (_intel_cols := min(len(_intel_cards), 3)) is not None
+                else []
             ),
             html.Div(
                 className="nexus-card",
                 style={"padding": "20px"},
                 children=[
                     _section_title("Capacity Planning", "Capacity utilization over time (downsampled daily)"),
-                    _chart_card(dcc.Graph(id="intel-capacity-trend-chart", figure=trend_fig, config={"displayModeBar": False}, style={"height": "260px"})),
+                    _chart_card(dcc.Graph(id="intel-capacity-trend-chart", figure=trend_fig, config={"displayModeBar": False}, style={"height": "300px"})),
                 ],
             ),
             html.Div(
@@ -1784,25 +2177,111 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
     free_gb = sum(parse_storage_string(s.get("total_free_space")) for s in systems)
     storage_pct = pct_float(used_gb, total_gb)
 
-    # Storage systems breakdown (used vs free)
-    labels = []
-    used_series = []
-    free_series = []
-    for s in systems:
-        labels.append(s.get("name") or s.get("storage_ip") or "System")
-        used_series.append(parse_storage_string(s.get("total_used_capacity")))
-        free_series.append(parse_storage_string(s.get("total_free_space")))
+    # Storage systems breakdown — premium system cards with used/free split bar
+    def _storage_system_rows():
+        rows = []
+        for s in systems:
+            name = s.get("name") or s.get("storage_ip") or "System"
+            used = parse_storage_string(s.get("total_used_capacity"))
+            free = parse_storage_string(s.get("total_free_space"))
+            total = used + free
+            used_pct = (used / total * 100) if total > 0 else 0
+            free_pct = 100 - used_pct
+            if used_pct >= 80:
+                used_grad = "linear-gradient(90deg, #FF6B6B, #EE5D50)"
+                used_color = "#EE5D50"
+                badge_bg  = "rgba(238,93,80,0.12)"
+            elif used_pct >= 60:
+                used_grad = "linear-gradient(90deg, #FFD080, #FFB547)"
+                used_color = "#FFB547"
+                badge_bg  = "rgba(255,181,71,0.12)"
+            else:
+                used_grad = "linear-gradient(90deg, #868CFF, #4318FF)"
+                used_color = "#4318FF"
+                badge_bg  = "rgba(67,24,255,0.08)"
 
-    breakdown_fig = (
-        create_grouped_bar_chart(
-            labels=labels,
-            series_dict={"Used": used_series, "Free": free_series},
-            title="Storage Systems (Used vs Free)",
-            height=380,
-        )
-        if systems
-        else go.Figure()
-    )
+            rows.append(html.Div(
+                style={
+                    "background": "#FAFBFF",
+                    "border": "1px solid #E9EDF7",
+                    "borderRadius": "12px",
+                    "padding": "16px 20px",
+                },
+                children=[
+                    # Top: name
+                    html.Div(
+                        style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "14px"},
+                        children=[
+                            html.Div(style={"width": "8px", "height": "8px", "borderRadius": "50%", "background": used_color, "flexShrink": 0}),
+                            html.Span(name, style={"fontWeight": 700, "fontSize": "0.9rem", "color": "#2B3674", "fontFamily": "DM Sans"}),
+                        ],
+                    ),
+                    # Split bar: used + free side by side
+                    html.Div(
+                        style={"display": "flex", "borderRadius": "10px", "overflow": "hidden", "height": "36px", "marginBottom": "12px"},
+                        children=[
+                            # Used segment
+                            html.Div(
+                                style={
+                                    "flex": f"{used_pct}",
+                                    "background": used_grad,
+                                    "display": "flex", "alignItems": "center", "justifyContent": "center",
+                                    "minWidth": "48px",
+                                },
+                                children=html.Span(
+                                    f"{used_pct:.1f}%",
+                                    style={"color": "white", "fontSize": "0.78rem", "fontWeight": 700, "fontFamily": "DM Sans"},
+                                ) if used_pct > 10 else None,
+                            ),
+                            # Free segment
+                            html.Div(
+                                style={
+                                    "flex": f"{free_pct}",
+                                    "background": "linear-gradient(90deg, #C6F6E2, #A8EDCB)",
+                                    "display": "flex", "alignItems": "center", "justifyContent": "center",
+                                    "minWidth": "48px",
+                                },
+                                children=html.Span(
+                                    f"{free_pct:.1f}%",
+                                    style={"color": "#05CD99", "fontSize": "0.78rem", "fontWeight": 700, "fontFamily": "DM Sans"},
+                                ) if free_pct > 10 else None,
+                            ),
+                        ],
+                    ),
+                    # Legend + stats row
+                    html.Div(
+                        style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"},
+                        children=[
+                            # Left legend
+                            html.Div(
+                                style={"display": "flex", "gap": "16px"},
+                                children=[
+                                    html.Div(
+                                        style={"display": "flex", "alignItems": "center", "gap": "6px"},
+                                        children=[
+                                            html.Div(style={"width": "10px", "height": "10px", "borderRadius": "3px", "background": used_color}),
+                                            html.Span(f"Used  {smart_storage(used)}", style={"fontSize": "0.78rem", "color": "#2B3674", "fontFamily": "DM Sans", "fontWeight": 600}),
+                                        ],
+                                    ),
+                                    html.Div(
+                                        style={"display": "flex", "alignItems": "center", "gap": "6px"},
+                                        children=[
+                                            html.Div(style={"width": "10px", "height": "10px", "borderRadius": "3px", "background": "#05CD99"}),
+                                            html.Span(f"Free  {smart_storage(free)}", style={"fontSize": "0.78rem", "color": "#2B3674", "fontFamily": "DM Sans", "fontWeight": 600}),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                            # Right total
+                            html.Span(
+                                f"Total: {smart_storage(total)}",
+                                style={"fontSize": "0.78rem", "color": "#A3AED0", "fontFamily": "DM Sans"},
+                            ),
+                        ],
+                    ),
+                ],
+            ))
+        return rows
 
     # Performance cards
     storage_series = storage_performance.get("series") or []
@@ -1881,38 +2360,65 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                 cols=4,
                 spacing="lg",
                 children=[
-                    _kpi("Storage Systems", f"{storage_system_count:,}", "solar:database-bold-duotone", color="grape"),
-                    _kpi("Total Capacity", smart_storage(total_gb), "solar:storage-bold-duotone", color="grape", is_text=True),
-                    _kpi("Used Capacity", smart_storage(used_gb), "solar:storage-bold-duotone", color="grape", is_text=True),
-                    _kpi("Utilization", f"{storage_pct:.1f}%", "solar:graph-bold-duotone", color="grape"),
+                    _kpi("Storage Systems", f"{storage_system_count:,}", _DC_ICONS["storage_systems"], color="grape"),
+                    _kpi("Total Capacity", smart_storage(total_gb), _DC_ICONS["total_capacity"], color="grape", is_text=True),
+                    _kpi("Used Capacity", smart_storage(used_gb), _DC_ICONS["used_capacity"], color="grape", is_text=True),
+                    _kpi("Utilization", f"{storage_pct:.1f}%", _DC_ICONS["utilization"], color="grape"),
                 ],
             ),
-            html.Div(
-                className="nexus-card",
-                style={"padding": "20px"},
+            dmc.SimpleGrid(
+                cols=2,
+                spacing="lg",
                 children=[
-                    _section_title("Storage Capacity", "Gauge and systems breakdown"),
-                    dmc.SimpleGrid(
-                        cols=2,
-                        spacing="lg",
+                    # LEFT CARD — Gauge + summary stats
+                    html.Div(
+                        className="nexus-card",
+                        style={"padding": "24px", "display": "flex", "flexDirection": "column", "gap": "16px"},
                         children=[
-                            _chart_card(
-                                dcc.Graph(
+                            _section_title("Storage Capacity", "Overall utilization"),
+                            html.Div(
+                                style={"display": "flex", "justifyContent": "center"},
+                                children=[dcc.Graph(
                                     figure=create_gauge_chart(used_gb, total_gb or 1, "Storage Capacity", color="#FFB547"),
                                     config={"displayModeBar": False},
-                                    style={"height": "250px"},
-                                )
+                                    style={"height": "220px", "width": "100%"},
+                                )] if _has_value(total_gb) else [
+                                    html.P("No data available.", style={"color": "#A3AED0", "fontSize": "0.85rem", "textAlign": "center", "paddingTop": "60px"}),
+                                ],
                             ),
-                            _chart_card(dcc.Graph(figure=breakdown_fig, config={"displayModeBar": False}, style={"height": "250px"})),
+                            # Summary stats row
+                            html.Div(
+                                style={"display": "flex", "justifyContent": "space-around", "borderTop": "1px solid #F4F7FE", "paddingTop": "16px"},
+                                children=[
+                                    html.Div(style={"textAlign": "center"}, children=[
+                                        html.Div(smart_storage(total_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#2B3674", "fontFamily": "DM Sans"}),
+                                        html.Div("Total", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
+                                    ]),
+                                    html.Div(style={"width": "1px", "background": "#F4F7FE"}),
+                                    html.Div(style={"textAlign": "center"}, children=[
+                                        html.Div(smart_storage(used_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#FFB547", "fontFamily": "DM Sans"}),
+                                        html.Div("Used", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
+                                    ]),
+                                    html.Div(style={"width": "1px", "background": "#F4F7FE"}),
+                                    html.Div(style={"textAlign": "center"}, children=[
+                                        html.Div(smart_storage(free_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#05CD99", "fontFamily": "DM Sans"}),
+                                        html.Div("Free", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
+                                    ]),
+                                ],
+                            ),
                         ],
                     ),
+                    # RIGHT CARD — Per-system breakdown
                     html.Div(
-                        style={"marginTop": "12px"},
+                        className="nexus-card",
+                        style={"padding": "24px"},
                         children=[
-                            _capacity_metric_row("Storage", total_gb, used_gb, storage_pct, smart_storage),
+                            _section_title("Systems Breakdown", f"{storage_system_count} storage system{'s' if storage_system_count != 1 else ''} detected"),
                             html.Div(
-                                f"Free capacity: {smart_storage(free_gb)}",
-                                style={"color": "#A3AED0", "fontSize": "0.85rem", "fontWeight": 700, "marginTop": "8px"},
+                                style={"marginTop": "16px", "display": "flex", "flexDirection": "column", "gap": "16px"},
+                                children=_storage_system_rows() or [
+                                    html.P("No storage systems found.", style={"color": "#A3AED0", "fontSize": "0.85rem"}),
+                                ],
                             ),
                         ],
                     ),
@@ -2184,8 +2690,12 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                 searchable=True,
                 nothingFoundMessage="No clusters",
                 placeholder=placeholder,
-                size="sm",
-                style={"minWidth": "260px"},
+                size="md",
+                radius="xl",
+                style={
+                    "minWidth": "260px",
+                    "background": "#F8F9FC",
+                },
             ),
         )
 

@@ -530,7 +530,7 @@ def build_region_detail_panel(region, tr):
     )
 
 
-def build_global_view(time_range=None):
+def build_global_view(time_range=None, visible_sections=None):
     tr = time_range or default_time_range()
     summaries = api.get_all_datacenters_summary(tr)
     globe_data = _build_globe_data(summaries)

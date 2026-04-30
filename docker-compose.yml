@@ -2,7 +2,7 @@
 #   docker compose --profile microservice up -d
 # Or set COMPOSE_PROFILES=microservice in .env so `docker compose up -d` starts the full stack.
 #
-# Mock-only single container (no profile): docker-compose.mock.yml → http://localhost:8050
+# Mock-only single container (no profile): docker-compose.mock.yml → http://localhost:8052
 #
 # Mock demo UI via this file (static data, no APIs): http://localhost:8051
 #   docker compose --profile mock up -d
@@ -20,9 +20,9 @@ services:
       context: .
       args:
         APP_BUILD_ID: ${APP_BUILD_ID:-local}
-    container_name: datalake-platform-gui-app
+    container_name: datalake-webui-mock-app
     ports:
-      - "8050:8050"
+      - "8052:8050"
     env_file:
       - .env
     environment:
@@ -43,7 +43,7 @@ services:
       context: .
       args:
         APP_BUILD_ID: ${APP_BUILD_ID:-local}
-    container_name: datalake-platform-gui-app-mock
+    container_name: datalake-webui-mock-app-mock
     ports:
       - "8051:8050"
     env_file:
@@ -60,7 +60,7 @@ services:
 
   db:
     image: postgres:15
-    container_name: datalake-platform-gui-db
+    container_name: datalake-webui-mock-db
     environment:
       POSTGRES_DB: datalake
       POSTGRES_USER: datalakeui

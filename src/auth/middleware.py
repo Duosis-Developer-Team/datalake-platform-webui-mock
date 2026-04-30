@@ -40,10 +40,16 @@ def register_middleware(app) -> None:
         path = request.path or "/"
 
         if AUTH_DISABLED:
-            row = service.get_user_by_username("admin")
+            try:
+                row = service.get_user_by_username("admin")
+            except Exception:
+                row = None
             if row:
                 g.auth_user = row
                 g.auth_user_id = int(row["id"])
+            else:
+                g.auth_user = {"id": 0, "username": "admin", "display_name": "Admin", "is_active": True}
+                g.auth_user_id = 0
             return None
 
         # Logged-in users should not stay on /login
@@ -58,7 +64,10 @@ def register_middleware(app) -> None:
         # redirect purposes but must still populate g from the session cookie so
         # callbacks (render_main_content, sidebar, etc.) see auth_user_id.
         if path.startswith("/_dash"):
-            _hydrate_g_from_session()
+            try:
+                _hydrate_g_from_session()
+            except Exception:
+                pass
             if getattr(g, "auth_user_id", None) is not None:
                 logger.debug(
                     "dash path session hydrated user_id=%s request_path=%s",
@@ -70,7 +79,10 @@ def register_middleware(app) -> None:
         if _is_public_path(path):
             return None
 
-        _hydrate_g_from_session()
+        try:
+            _hydrate_g_from_session()
+        except Exception:
+            pass
         urow = getattr(g, "auth_user", None)
         if not urow:
             from urllib.parse import quote

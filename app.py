@@ -251,6 +251,7 @@ _mantine_children: list = [
         dcc.Store(id="auth-user-store", data=None),
         dcc.Store(id="auth-permissions-store", data=None),
         html.Div(id="export-pdf-clientside-dummy", style={"display": "none"}),
+        dcc.Store(id="pdf-export-trigger-store", data=None),
         html.Div(
             [
                 _sidebar,
@@ -320,39 +321,19 @@ if is_mock_mode():
 
 app.clientside_callback(
     """
-    function(homePdf, dcListPdf, dcPdf, globalPdf, customerPdf, qePdf) {
-        const triggered = dash_clientside.callback_context.triggered;
-        if (!triggered || !triggered.length || !triggered[0]) {
-            return window.dash_clientside.no_update;
-        }
-        const propId = triggered[0].prop_id || "";
-        const id = propId.split(".")[0];
-        const map = {
-            "home-export-pdf": "home_overview",
-            "datacenters-export-pdf": "datacenters",
-            "dc-export-pdf": "dc_detail",
-            "global-export-pdf": "global_view",
-            "customer-export-pdf": "customer_view",
-            "qe-export-pdf": "query_explorer"
-        };
-        const prefix = map[id];
-        if (!prefix) {
+    function(triggerData) {
+        if (!triggerData || !triggerData.prefix) {
             return window.dash_clientside.no_update;
         }
         const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
         if (typeof window.triggerPagePDF === "function") {
-            window.triggerPagePDF("main-content", prefix + "_" + ts + ".pdf");
+            window.triggerPagePDF("main-content", triggerData.prefix + "_" + ts + ".pdf");
         }
         return window.dash_clientside.no_update;
     }
     """,
     dash.Output("export-pdf-clientside-dummy", "children"),
-    dash.Input("home-export-pdf", "n_clicks"),
-    dash.Input("datacenters-export-pdf", "n_clicks"),
-    dash.Input("dc-export-pdf", "n_clicks"),
-    dash.Input("global-export-pdf", "n_clicks"),
-    dash.Input("customer-export-pdf", "n_clicks"),
-    dash.Input("qe-export-pdf", "n_clicks"),
+    dash.Input("pdf-export-trigger-store", "data"),
     prevent_initial_call=True,
 )
 
@@ -1674,4 +1655,4 @@ def update_intel_disk_trend(disk_name, host, time_range, pathname):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8050, use_reloader=False)
+    app.run(debug=True, port=8050, use_reloader=False, dev_tools_ui=False)

@@ -578,3 +578,13 @@ def on_add(n_clicks, key, sql, result_type, params_style):
         return dmc.Alert("Query added. Select it from the catalog or dropdown to run or edit.", color="green"), _query_options()
     except Exception as e:
         return dmc.Alert(f"Add failed: {e}", color="red"), dash.no_update
+
+
+from dash import clientside_callback  # noqa: E402
+
+clientside_callback(
+    "function(n) { if (!n) return window.dash_clientside.no_update; return {prefix: 'query_explorer'}; }",
+    Output("pdf-export-trigger-store", "data", allow_duplicate=True),
+    Input("qe-export-pdf", "n_clicks"),
+    prevent_initial_call=True,
+)

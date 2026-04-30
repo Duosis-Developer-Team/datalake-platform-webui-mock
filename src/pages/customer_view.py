@@ -1,3 +1,4 @@
+from __future__ import annotations
 # Customer View - Billing-focused resource breakdown per customer.
 # Tab hierarchy: Summary | Virtualization (Classic / Hyperconverged / Power) | Backup
 import json
@@ -1630,3 +1631,13 @@ def export_customer_view(nc, nx, store, time_range):
     if not sections:
         sections = [("Data", records_to_dataframe([]))]
     return dash_send_csv_bytes(csv_bytes_with_report_header(report_info, sections), base)
+
+
+from dash import clientside_callback  # noqa: E402
+
+clientside_callback(
+    "function(n) { if (!n) return window.dash_clientside.no_update; return {prefix: 'customer_view'}; }",
+    Output("pdf-export-trigger-store", "data", allow_duplicate=True),
+    Input("customer-export-pdf", "n_clicks"),
+    prevent_initial_call=True,
+)

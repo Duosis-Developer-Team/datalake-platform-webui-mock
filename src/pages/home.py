@@ -1,3 +1,4 @@
+from __future__ import annotations
 import dash
 from dash import html, dcc, callback, Input, Output, State, callback_context
 import dash_mantine_components as dmc
@@ -932,3 +933,13 @@ def export_home_overview(nc_csv, nc_xlsx, store, time_range):
     report_info = build_report_info_df(time_range, "Executive_Overview", None)
     sections = [("DC_Summary", df_sum), ("Physical_Inventory", df_phys)]
     return dash_send_csv_bytes(csv_bytes_with_report_header(report_info, sections), "home_overview")
+
+
+from dash import clientside_callback  # noqa: E402
+
+clientside_callback(
+    "function(n) { if (!n) return window.dash_clientside.no_update; return {prefix: 'home_overview'}; }",
+    Output("pdf-export-trigger-store", "data", allow_duplicate=True),
+    Input("home-export-pdf", "n_clicks"),
+    prevent_initial_call=True,
+)

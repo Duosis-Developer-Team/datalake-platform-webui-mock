@@ -25,9 +25,12 @@ auth_bp = Blueprint("auth_routes", __name__, url_prefix="/auth")
 
 @auth_bp.route("/login", methods=["POST"])
 def login_post():
+    from src.auth.config import AUTH_DISABLED
     username = (request.form.get("username") or "").strip()
     password = request.form.get("password") or ""
     nxt = request.form.get("next") or "/"
+    if AUTH_DISABLED:
+        return redirect(nxt or "/")
     user = service.authenticate_local(username, password)
     if not user:
         cfg = get_active_ldap_config()
