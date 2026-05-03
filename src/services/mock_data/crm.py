@@ -60,30 +60,84 @@ _DISCOVERY_COUNTS: list[dict[str, Any]] = [
     {"table_name": "discovery_crm_products", "row_count": 128, "last_collected": "2026-05-03T12:00:00Z"},
 ]
 
-_PAGES: list[dict[str, Any]] = [
-    {
-        "page_key": "compute_cpu",
-        "category_label": "Compute — CPU",
-        "gui_tab_binding": "customer.resources.cpu",
-        "resource_unit": "core",
-        "icon": "cpu",
-        "route_hint": "/customer-view",
-        "tab_hint": "Resources",
-        "sub_tab_hint": "CPU",
+def _page(page_key: str, label: str, binding: str, unit: str) -> dict[str, Any]:
+    return {
+        "page_key": page_key,
+        "category_label": label,
+        "gui_tab_binding": binding,
+        "resource_unit": unit,
+        "icon": None,
+        "route_hint": None,
+        "tab_hint": None,
+        "sub_tab_hint": None,
     }
+
+
+# Granular page registry mirrors gui_crm_service_pages (see config/crm_service_mapping.yaml).
+_PAGES: list[dict[str, Any]] = [
+    _page("virt_classic", "Classic virtualization", "virtualization.classic", "vCPU"),
+    _page("virt_classic_cpu", "Classic virtualization — CPU", "virtualization.classic", "vCPU"),
+    _page("virt_classic_ram", "Classic virtualization — RAM", "virtualization.classic", "GB"),
+    _page("virt_classic_storage", "Classic virtualization — Storage", "virtualization.classic", "GB"),
+    _page("virt_hyperconverged", "Hyperconverged virtualization", "virtualization.hyperconverged", "vCPU"),
+    _page("virt_hyperconverged_cpu", "Hyperconverged virtualization — CPU", "virtualization.hyperconverged", "vCPU"),
+    _page("virt_hyperconverged_ram", "Hyperconverged virtualization — RAM", "virtualization.hyperconverged", "GB"),
+    _page("virt_hyperconverged_storage", "Hyperconverged virtualization — Storage", "virtualization.hyperconverged", "GB"),
+    _page("virt_nutanix", "Pure Nutanix (AHV)", "virtualization.nutanix", "vCPU"),
+    _page("virt_nutanix_cpu", "Pure Nutanix — CPU", "virtualization.nutanix", "vCPU"),
+    _page("virt_nutanix_ram", "Pure Nutanix — RAM", "virtualization.nutanix", "GB"),
+    _page("virt_nutanix_storage", "Pure Nutanix — Storage", "virtualization.nutanix", "GB"),
+    _page("virt_power", "IBM Power LPAR", "virtualization.power", "core"),
+    _page("virt_power_cpu", "IBM Power — CPU", "virtualization.power", "core"),
+    _page("virt_power_ram", "IBM Power — RAM", "virtualization.power", "GB"),
+    _page("virt_power_storage", "IBM Power — Storage", "virtualization.power", "GB"),
+    _page("backup_veeam", "Veeam backup", "backup.veeam", "per VM"),
+    _page("backup_veeam_cpu", "Veeam replication — CPU", "backup.veeam", "vCPU"),
+    _page("backup_veeam_ram", "Veeam replication — RAM", "backup.veeam", "GB"),
+    _page("backup_veeam_storage", "Veeam backup — Storage", "backup.veeam", "GB"),
+    _page("backup_zerto", "Zerto replication", "backup.zerto", "vCPU"),
+    _page("backup_zerto_cpu", "Zerto replication — CPU", "backup.zerto", "vCPU"),
+    _page("backup_zerto_ram", "Zerto replication — RAM", "backup.zerto", "GB"),
+    _page("backup_zerto_storage", "Zerto replication — Storage", "backup.zerto", "GB"),
+    _page("backup_netbackup", "NetBackup", "backup.netbackup", "GB"),
+    _page("backup_netbackup_storage", "NetBackup — Storage", "backup.netbackup", "GB"),
+    _page("storage_s3", "Object storage (S3)", "storage.s3", "GB"),
+    _page("firewall_fortigate", "FortiGate", "security.firewall", "Adet"),
+    _page("firewall_paloalto", "Palo Alto", "security.firewall", "Adet"),
+    _page("firewall_sophos", "Sophos", "security.firewall", "Adet"),
+    _page("firewall_citrix", "Citrix ADC", "security.firewall", "Adet"),
+    _page("licensing_microsoft", "Microsoft CSP / M365 / SPLA", "licensing.microsoft", "per User"),
+    _page("licensing_redhat", "Red Hat", "licensing.redhat", "Adet"),
+    _page("dc_hosting", "Colocation / hosting", "datacenter.hosting", "Adet"),
+    _page("dc_energy", "Datacenter energy", "datacenter.energy", "kW"),
+    _page("monitoring", "Monitoring", "operations.monitoring", "per VM"),
+    _page("database_managed", "Managed database", "data.database", "Adet"),
+    _page("other", "Other / uncategorized", "other", "Adet"),
 ]
 
 _MAPPINGS: dict[str, dict[str, Any]] = {
-    "00000000-0000-0000-0000-000000000001": {
-        "productid": "00000000-0000-0000-0000-000000000001",
-        "product_name": "Mock vCPU",
-        "product_number": "SKU-CPU-001",
-        "category_code": "compute_cpu",
-        "category_label": "Compute — CPU",
-        "gui_tab_binding": "customer.resources.cpu",
-        "resource_unit": "core",
-        "source": "seed",
-    }
+    # Example seed: HCI RAM SKU mapped to its dedicated panel.
+    "1e635018-5c6d-f011-b4cc-6045bd93381c": {
+        "productid": "1e635018-5c6d-f011-b4cc-6045bd93381c",
+        "product_name": "Hyperconverged Mimari Intel RAM",
+        "product_number": "000BLT-52",
+        "category_code": "virt_hyperconverged_ram",
+        "category_label": "Hyperconverged virtualization — RAM",
+        "gui_tab_binding": "virtualization.hyperconverged",
+        "resource_unit": "GB",
+        "source": "yaml",
+    },
+    # Example unmatched product so the UI can render the orange badge.
+    "edb3353a-aae2-f011-8406-000d3a2b6ad9": {
+        "productid": "edb3353a-aae2-f011-8406-000d3a2b6ad9",
+        "product_name": "Dummy Product",
+        "product_number": "DMY.PRD.001",
+        "category_code": None,
+        "category_label": None,
+        "gui_tab_binding": None,
+        "resource_unit": None,
+        "source": "unmatched",
+    },
 }
 
 
@@ -218,34 +272,47 @@ def list_service_mappings() -> list[dict[str, Any]]:
     return deepcopy(list(_MAPPINGS.values()))
 
 
+def _page_meta(page_key: str) -> dict[str, Any]:
+    for p in _PAGES:
+        if p["page_key"] == page_key:
+            return p
+    return {
+        "page_key": page_key,
+        "category_label": page_key,
+        "gui_tab_binding": "other",
+        "resource_unit": "Adet",
+    }
+
+
 def upsert_service_mapping(*, productid: str, page_key: str, notes: Optional[str]) -> dict[str, Any]:
     pid = str(productid)
-    cur = _MAPPINGS.get(pid)
-    if not cur:
-        cur = {
-            "productid": pid,
-            "product_name": "Unknown product",
-            "product_number": "",
-            "category_code": page_key,
-            "category_label": page_key,
-            "gui_tab_binding": "customer.resources.unknown",
-            "resource_unit": "unit",
-            "source": "override",
-        }
+    cur = _MAPPINGS.get(pid) or {
+        "productid": pid,
+        "product_name": "Unknown product",
+        "product_number": "",
+    }
+    meta = _page_meta(page_key)
     cur["category_code"] = page_key
+    cur["category_label"] = meta["category_label"]
+    cur["gui_tab_binding"] = meta["gui_tab_binding"]
+    cur["resource_unit"] = meta["resource_unit"]
     cur["source"] = "override"
     if notes:
-        cur.setdefault("_notes", notes)
+        cur["_notes"] = notes
     _MAPPINGS[pid] = cur
     return {"status": "ok", "productid": pid}
 
 
 def delete_service_mapping_override(productid: str) -> dict[str, Any]:
+    """Reset to unmatched (mock seed has no fallback page_key)."""
     pid = str(productid)
     row = _MAPPINGS.get(pid)
     if not row:
         return {"status": "ok", "rows_deleted": 0}
-    row["source"] = "seed"
-    row["category_code"] = "compute_cpu"
+    row["source"] = "unmatched"
+    row["category_code"] = None
+    row["category_label"] = None
+    row["gui_tab_binding"] = None
+    row["resource_unit"] = None
     _MAPPINGS[pid] = row
     return {"status": "ok", "rows_deleted": 1}
