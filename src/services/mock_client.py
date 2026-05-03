@@ -18,6 +18,7 @@ from src.services.mock_data import physical_inventory as mock_phys
 from src.services.mock_data import sla as mock_sla
 from src.services.mock_data import storage as mock_storage
 from src.services.mock_data import virtualization as mock_virt
+from src.services.mock_data import crm as mock_crm
 
 
 def get_global_dashboard(tr: Optional[dict]) -> dict:
@@ -231,3 +232,120 @@ def get_dc_availability_sla_item(
     dc_code: str, dc_display_name: str, tr: Optional[dict]
 ) -> Optional[dict[str, Any]]:
     return mock_sla.get_dc_availability_sla_item(dc_code, dc_display_name, tr)
+
+
+# ---------------------------------------------------------------------------
+# CRM operator configuration (customer-api contract)
+# ---------------------------------------------------------------------------
+
+
+def get_crm_discovery_counts() -> list[dict[str, Any]]:
+    return mock_crm.list_discovery_counts()
+
+
+def get_crm_config_thresholds() -> list[dict[str, Any]]:
+    return mock_crm.list_thresholds()
+
+
+def put_crm_config_threshold(
+    *,
+    resource_type: str,
+    dc_code: str,
+    sellable_limit_pct: float,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_threshold(
+        resource_type=resource_type,
+        dc_code=dc_code,
+        sellable_limit_pct=sellable_limit_pct,
+        notes=notes,
+    )
+
+
+def delete_crm_config_threshold(threshold_id: int) -> dict[str, Any]:
+    return mock_crm.delete_threshold(int(threshold_id))
+
+
+def get_crm_price_overrides() -> list[dict[str, Any]]:
+    return mock_crm.list_price_overrides()
+
+
+def put_crm_price_override(
+    productid: str,
+    *,
+    product_name: Optional[str],
+    unit_price_tl: float,
+    resource_unit: Optional[str] = None,
+    currency: Optional[str] = "TL",
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_price_override(
+        productid=productid,
+        product_name=product_name,
+        unit_price_tl=float(unit_price_tl),
+        resource_unit=resource_unit,
+        currency=currency,
+        notes=notes,
+    )
+
+
+def delete_crm_price_override(productid: str) -> dict[str, Any]:
+    return mock_crm.delete_price_override(productid)
+
+
+def get_crm_calc_config() -> list[dict[str, Any]]:
+    return mock_crm.list_calc_config()
+
+
+def put_crm_calc_config(
+    config_key: str,
+    *,
+    config_value: str,
+    value_type: Optional[str] = None,
+    description: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_calc_config(
+        config_key=config_key,
+        config_value=config_value,
+        value_type=value_type,
+        description=description,
+    )
+
+
+def get_crm_aliases() -> list[dict[str, Any]]:
+    return mock_crm.list_aliases()
+
+
+def put_crm_alias(
+    crm_accountid: str,
+    *,
+    canonical_customer_key: Optional[str] = None,
+    netbox_musteri_value: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_alias(
+        crm_accountid=crm_accountid,
+        canonical_customer_key=canonical_customer_key,
+        netbox_musteri_value=netbox_musteri_value,
+        notes=notes,
+    )
+
+
+def delete_crm_alias(crm_accountid: str) -> dict[str, Any]:
+    return mock_crm.delete_alias(crm_accountid)
+
+
+def get_crm_service_mapping_pages() -> list[dict[str, Any]]:
+    return mock_crm.list_service_mapping_pages()
+
+
+def get_crm_service_mappings() -> list[dict[str, Any]]:
+    return mock_crm.list_service_mappings()
+
+
+def put_crm_service_mapping(productid: str, *, page_key: str, notes: Optional[str] = None) -> dict[str, Any]:
+    return mock_crm.upsert_service_mapping(productid=productid, page_key=page_key, notes=notes)
+
+
+def delete_crm_service_mapping_override(productid: str) -> dict[str, Any]:
+    return mock_crm.delete_service_mapping_override(productid)
