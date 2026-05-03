@@ -72,6 +72,38 @@ def test_api_client_delegates_when_mock(mock_env) -> None:
     assert len(s) == 4
 
 
+def test_api_client_crm_config_when_mock(mock_env) -> None:
+    ac = mock_env
+
+    counts = ac.get_crm_discovery_counts()
+    assert isinstance(counts, list)
+    assert len(counts) >= 1
+
+    thr = ac.get_crm_config_thresholds()
+    assert isinstance(thr, list)
+    assert any(r.get("resource_type") == "cpu" for r in thr)
+
+    po = ac.get_crm_price_overrides()
+    assert isinstance(po, list)
+    assert len(po) >= 1
+
+    cfg = ac.get_crm_calc_config()
+    assert isinstance(cfg, list)
+    assert any(r.get("config_key") == "efficiency_under_pct" for r in cfg)
+
+    aliases = ac.get_crm_aliases()
+    assert isinstance(aliases, list)
+    assert len(aliases) >= 1
+
+    pages = ac.get_crm_service_mapping_pages()
+    assert isinstance(pages, list)
+    assert pages[0]["page_key"]
+
+    mappings = ac.get_crm_service_mappings()
+    assert isinstance(mappings, list)
+    assert mappings[0]["productid"]
+
+
 def test_mock_summaries_site_names_on_global_map_keys() -> None:
     for s in get_all_datacenters_summary():
         sn = (s.get("site_name") or "").upper().strip()

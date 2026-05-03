@@ -158,6 +158,20 @@ def _get_json(client: httpx.Client, path: str, params: Optional[dict[str, str]] 
     return response.json()
 
 
+def _put_json(client: httpx.Client, path: str, body: dict[str, Any]) -> Any:
+    response = client.put(path, json=body, headers=_auth_headers())
+    response.raise_for_status()
+    return response.json()
+
+
+def _delete_json(client: httpx.Client, path: str) -> Any:
+    response = client.delete(path, headers=_auth_headers())
+    response.raise_for_status()
+    if not response.content:
+        return {}
+    return response.json()
+
+
 def get_global_dashboard(tr: Optional[dict]) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
@@ -854,3 +868,281 @@ def get_dc_availability_sla_item(dc_code: str, dc_display_name: str, tr: Optiona
         return None
     except Exception:
         return None
+
+
+def get_crm_service_mapping_pages() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_service_mapping_pages()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/service-mapping/pages")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_crm_service_mappings() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_service_mappings()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/service-mapping")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_crm_service_mapping(
+    productid: str,
+    *,
+    page_key: str,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_crm_service_mapping(productid, page_key=page_key, notes=notes)
+    enc = quote(productid, safe="")
+    body: dict[str, Any] = {"page_key": page_key}
+    if notes is not None:
+        body["notes"] = notes
+    try:
+        out = _put_json(_client_cust, f"/api/v1/crm/service-mapping/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def delete_crm_service_mapping_override(productid: str) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.delete_crm_service_mapping_override(productid)
+    enc = quote(productid, safe="")
+    try:
+        out = _delete_json(_client_cust, f"/api/v1/crm/service-mapping/{enc}/override")
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_aliases() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_aliases()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/aliases")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_crm_alias(
+    crm_accountid: str,
+    *,
+    canonical_customer_key: Optional[str] = None,
+    netbox_musteri_value: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_crm_alias(
+            crm_accountid,
+            canonical_customer_key=canonical_customer_key,
+            netbox_musteri_value=netbox_musteri_value,
+            notes=notes,
+        )
+    enc = quote(crm_accountid, safe="")
+    body = {
+        "canonical_customer_key": canonical_customer_key,
+        "netbox_musteri_value": netbox_musteri_value,
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_cust, f"/api/v1/crm/aliases/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def delete_crm_alias(crm_accountid: str) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.delete_crm_alias(crm_accountid)
+    enc = quote(crm_accountid, safe="")
+    try:
+        out = _delete_json(_client_cust, f"/api/v1/crm/aliases/{enc}")
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_discovery_counts() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_discovery_counts()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/config/discovery-counts")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_crm_config_thresholds() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_config_thresholds()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/config/thresholds")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_crm_config_threshold(
+    *,
+    resource_type: str,
+    dc_code: str,
+    sellable_limit_pct: float,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_crm_config_threshold(
+            resource_type=resource_type,
+            dc_code=dc_code,
+            sellable_limit_pct=sellable_limit_pct,
+            notes=notes,
+        )
+    body = {
+        "resource_type": resource_type,
+        "dc_code": dc_code,
+        "sellable_limit_pct": sellable_limit_pct,
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_cust, "/api/v1/crm/config/thresholds", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def delete_crm_config_threshold(threshold_id: int) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.delete_crm_config_threshold(threshold_id)
+    try:
+        out = _delete_json(_client_cust, f"/api/v1/crm/config/thresholds/{int(threshold_id)}")
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_price_overrides() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_price_overrides()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/config/price-overrides")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_crm_price_override(
+    productid: str,
+    *,
+    product_name: Optional[str],
+    unit_price_tl: float,
+    resource_unit: Optional[str] = None,
+    currency: Optional[str] = "TL",
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_crm_price_override(
+            productid,
+            product_name=product_name,
+            unit_price_tl=unit_price_tl,
+            resource_unit=resource_unit,
+            currency=currency,
+            notes=notes,
+        )
+    enc = quote(productid, safe="")
+    body: dict[str, Any] = {
+        "product_name": product_name,
+        "unit_price_tl": unit_price_tl,
+        "resource_unit": resource_unit,
+        "currency": currency,
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_cust, f"/api/v1/crm/config/price-overrides/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def delete_crm_price_override(productid: str) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.delete_crm_price_override(productid)
+    enc = quote(productid, safe="")
+    try:
+        out = _delete_json(_client_cust, f"/api/v1/crm/config/price-overrides/{enc}")
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_calc_config() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_calc_config()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/config/variables")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_crm_calc_config(
+    config_key: str,
+    *,
+    config_value: str,
+    value_type: Optional[str] = None,
+    description: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_crm_calc_config(
+            config_key,
+            config_value=config_value,
+            value_type=value_type,
+            description=description,
+        )
+    enc = quote(config_key, safe="")
+    body: dict[str, Any] = {"config_value": config_value}
+    if value_type is not None:
+        body["value_type"] = value_type
+    if description is not None:
+        body["description"] = description
+    try:
+        out = _put_json(_client_cust, f"/api/v1/crm/config/variables/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
