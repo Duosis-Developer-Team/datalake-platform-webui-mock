@@ -253,12 +253,14 @@ def put_crm_config_threshold(
     dc_code: str,
     sellable_limit_pct: float,
     notes: Optional[str] = None,
+    panel_key: Optional[str] = None,
 ) -> dict[str, Any]:
     return mock_crm.upsert_threshold(
         resource_type=resource_type,
         dc_code=dc_code,
         sellable_limit_pct=sellable_limit_pct,
         notes=notes,
+        panel_key=panel_key,
     )
 
 
@@ -349,3 +351,136 @@ def put_crm_service_mapping(productid: str, *, page_key: str, notes: Optional[st
 
 def delete_crm_service_mapping_override(productid: str) -> dict[str, Any]:
     return mock_crm.delete_service_mapping_override(productid)
+
+
+# ---------------------------------------------------------------------------
+# CRM Sellable Potential (customer-api contract)
+# ---------------------------------------------------------------------------
+
+
+def get_sellable_summary(dc_code: str = "*") -> dict[str, Any]:
+    return deepcopy(mock_crm.sellable_summary(dc_code))
+
+
+def get_sellable_by_panel(dc_code: str = "*", family: Optional[str] = None) -> list[dict[str, Any]]:
+    return mock_crm.sellable_by_panel(dc_code, family)
+
+
+def get_sellable_by_family(dc_code: str = "*") -> list[dict[str, Any]]:
+    return mock_crm.sellable_by_family(dc_code)
+
+
+def get_metric_tags(prefix: Optional[str] = None, scope_type: str = "global", scope_id: str = "*") -> list[dict[str, Any]]:
+    return mock_crm.metric_tags(prefix=prefix, scope_type=scope_type, scope_id=scope_id)
+
+
+def get_metric_snapshots(metric_key: str, hours: int = 720, scope_id: str = "*") -> list[dict[str, Any]]:
+    return mock_crm.metric_snapshots(metric_key, hours=hours, scope_id=scope_id)
+
+
+def get_panel_definitions() -> list[dict[str, Any]]:
+    return mock_crm.list_panel_definitions()
+
+
+def put_panel_definition(
+    panel_key: str,
+    *,
+    label: str,
+    family: str,
+    resource_kind: str,
+    display_unit: str = "GB",
+    sort_order: int = 100,
+    enabled: bool = True,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_panel_definition(
+        panel_key,
+        label=label,
+        family=family,
+        resource_kind=resource_kind,
+        display_unit=display_unit,
+        sort_order=sort_order,
+        enabled=enabled,
+        notes=notes,
+    )
+
+
+def get_panel_infra_source(panel_key: str, dc_code: str = "*") -> dict[str, Any]:
+    return deepcopy(mock_crm.get_panel_infra_source(panel_key, dc_code))
+
+
+def put_panel_infra_source(
+    panel_key: str,
+    dc_code: str = "*",
+    *,
+    source_table: Optional[str] = None,
+    total_column: Optional[str] = None,
+    total_unit: Optional[str] = None,
+    allocated_table: Optional[str] = None,
+    allocated_column: Optional[str] = None,
+    allocated_unit: Optional[str] = None,
+    filter_clause: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_panel_infra_source(
+        panel_key,
+        dc_code,
+        source_table=source_table,
+        total_column=total_column,
+        total_unit=total_unit,
+        allocated_table=allocated_table,
+        allocated_column=allocated_column,
+        allocated_unit=allocated_unit,
+        filter_clause=filter_clause,
+        notes=notes,
+    )
+
+
+def get_resource_ratios() -> list[dict[str, Any]]:
+    return mock_crm.list_resource_ratios()
+
+
+def put_resource_ratio(
+    family: str,
+    *,
+    dc_code: str = "*",
+    cpu_per_unit: float = 1.0,
+    ram_gb_per_unit: float = 8.0,
+    storage_gb_per_unit: float = 100.0,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_resource_ratio(
+        family,
+        dc_code=dc_code,
+        cpu_per_unit=cpu_per_unit,
+        ram_gb_per_unit=ram_gb_per_unit,
+        storage_gb_per_unit=storage_gb_per_unit,
+        notes=notes,
+    )
+
+
+def get_unit_conversions() -> list[dict[str, Any]]:
+    return mock_crm.list_unit_conversions()
+
+
+def put_unit_conversion(
+    from_unit: str,
+    to_unit: str,
+    *,
+    factor: float,
+    operation: str = "divide",
+    ceil_result: bool = False,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.upsert_unit_conversion(
+        from_unit,
+        to_unit,
+        factor=factor,
+        operation=operation,
+        ceil_result=ceil_result,
+        notes=notes,
+    )
+
+
+def delete_unit_conversion(from_unit: str, to_unit: str) -> dict[str, Any]:
+    return mock_crm.delete_unit_conversion(from_unit, to_unit)

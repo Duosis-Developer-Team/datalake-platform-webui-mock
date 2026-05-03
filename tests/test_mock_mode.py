@@ -103,6 +103,27 @@ def test_api_client_crm_config_when_mock(mock_env) -> None:
     assert isinstance(mappings, list)
     assert mappings[0]["productid"]
 
+    summ = ac.get_sellable_summary("*")
+    assert isinstance(summ, dict)
+    assert summ.get("total_potential_tl") == 5580.0
+    assert isinstance(summ.get("families"), list)
+
+    by_panel = ac.get_sellable_by_panel("*", family="virt_hyperconverged")
+    assert isinstance(by_panel, list)
+    assert len(by_panel) == 3
+
+    tags = ac.get_metric_tags(prefix="crm.")
+    assert isinstance(tags, list)
+    assert any(t.get("metric_key", "").startswith("crm.") for t in tags)
+
+    snaps = ac.get_metric_snapshots("crm.sellable_potential.total_tl", hours=24)
+    assert isinstance(snaps, list)
+    assert snaps and snaps[0].get("value") == 5580.0
+
+    panels = ac.get_panel_definitions()
+    assert isinstance(panels, list)
+    assert any(p.get("panel_key") == "virt_hyperconverged_cpu" for p in panels)
+
 
 def test_mock_summaries_site_names_on_global_map_keys() -> None:
     for s in get_all_datacenters_summary():

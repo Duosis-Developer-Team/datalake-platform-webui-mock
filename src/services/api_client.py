@@ -1012,6 +1012,7 @@ def put_crm_config_threshold(
     dc_code: str,
     sellable_limit_pct: float,
     notes: Optional[str] = None,
+    panel_key: Optional[str] = None,
 ) -> dict[str, Any]:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
@@ -1021,12 +1022,14 @@ def put_crm_config_threshold(
             dc_code=dc_code,
             sellable_limit_pct=sellable_limit_pct,
             notes=notes,
+            panel_key=panel_key,
         )
     body = {
         "resource_type": resource_type,
         "dc_code": dc_code,
         "sellable_limit_pct": sellable_limit_pct,
         "notes": notes,
+        "panel_key": panel_key or None,
     }
     try:
         out = _put_json(_client_cust, "/api/v1/crm/config/thresholds", body)
@@ -1143,6 +1146,307 @@ def put_crm_calc_config(
         body["description"] = description
     try:
         out = _put_json(_client_cust, f"/api/v1/crm/config/variables/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Sellable Potential (customer-api)
+# ---------------------------------------------------------------------------
+
+
+def get_sellable_summary(dc_code: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_sellable_summary(dc_code)
+    try:
+        data = _get_json(_client_cust, f"/api/v1/crm/sellable-potential/summary?dc_code={quote(dc_code, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_sellable_by_panel(dc_code: str = "*", family: Optional[str] = None) -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_sellable_by_panel(dc_code, family)
+    qs = f"dc_code={quote(dc_code, safe='*')}"
+    if family:
+        qs += f"&family={quote(family, safe='')}"
+    try:
+        data = _get_json(_client_cust, f"/api/v1/crm/sellable-potential/by-panel?{qs}")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_sellable_by_family(dc_code: str = "*") -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_sellable_by_family(dc_code)
+    try:
+        data = _get_json(_client_cust, f"/api/v1/crm/sellable-potential/by-family?dc_code={quote(dc_code, safe='*')}")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_metric_tags(prefix: Optional[str] = None, scope_type: str = "global", scope_id: str = "*") -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_metric_tags(prefix=prefix, scope_type=scope_type, scope_id=scope_id)
+    qs_parts = [f"scope_type={quote(scope_type, safe='')}", f"scope_id={quote(scope_id, safe='*')}"]
+    if prefix:
+        qs_parts.append(f"prefix={quote(prefix, safe='')}")
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/metric-tags?" + "&".join(qs_parts))
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_metric_snapshots(metric_key: str, hours: int = 720, scope_id: str = "*") -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_metric_snapshots(metric_key, hours=hours, scope_id=scope_id)
+    try:
+        url = (
+            "/api/v1/crm/metric-tags/snapshots?"
+            f"metric_key={quote(metric_key, safe='')}"
+            f"&scope_id={quote(scope_id, safe='*')}"
+            f"&hours={int(hours)}"
+        )
+        data = _get_json(_client_cust, url)
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_panel_definitions() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_panel_definitions()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/panels")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_panel_definition(
+    panel_key: str,
+    *,
+    label: str,
+    family: str,
+    resource_kind: str,
+    display_unit: str = "GB",
+    sort_order: int = 100,
+    enabled: bool = True,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_panel_definition(
+            panel_key,
+            label=label,
+            family=family,
+            resource_kind=resource_kind,
+            display_unit=display_unit,
+            sort_order=sort_order,
+            enabled=enabled,
+            notes=notes,
+        )
+    enc = quote(panel_key, safe="")
+    body = {
+        "label": label,
+        "family": family,
+        "resource_kind": resource_kind,
+        "display_unit": display_unit,
+        "sort_order": sort_order,
+        "enabled": enabled,
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_cust, f"/api/v1/crm/panels/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_panel_infra_source(panel_key: str, dc_code: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_panel_infra_source(panel_key, dc_code)
+    enc = quote(panel_key, safe="")
+    try:
+        data = _get_json(_client_cust, f"/api/v1/crm/panels/{enc}/infra-source?dc_code={quote(dc_code, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def put_panel_infra_source(
+    panel_key: str,
+    dc_code: str = "*",
+    *,
+    source_table: Optional[str] = None,
+    total_column: Optional[str] = None,
+    total_unit: Optional[str] = None,
+    allocated_table: Optional[str] = None,
+    allocated_column: Optional[str] = None,
+    allocated_unit: Optional[str] = None,
+    filter_clause: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_panel_infra_source(
+            panel_key,
+            dc_code,
+            source_table=source_table,
+            total_column=total_column,
+            total_unit=total_unit,
+            allocated_table=allocated_table,
+            allocated_column=allocated_column,
+            allocated_unit=allocated_unit,
+            filter_clause=filter_clause,
+            notes=notes,
+        )
+    enc = quote(panel_key, safe="")
+    body = {
+        "dc_code": dc_code,
+        "source_table": source_table,
+        "total_column": total_column,
+        "total_unit": total_unit,
+        "allocated_table": allocated_table,
+        "allocated_column": allocated_column,
+        "allocated_unit": allocated_unit,
+        "filter_clause": filter_clause,
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_cust, f"/api/v1/crm/panels/{enc}/infra-source", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_resource_ratios() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_resource_ratios()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/resource-ratios")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_resource_ratio(
+    family: str,
+    *,
+    dc_code: str = "*",
+    cpu_per_unit: float = 1.0,
+    ram_gb_per_unit: float = 8.0,
+    storage_gb_per_unit: float = 100.0,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_resource_ratio(
+            family,
+            dc_code=dc_code,
+            cpu_per_unit=cpu_per_unit,
+            ram_gb_per_unit=ram_gb_per_unit,
+            storage_gb_per_unit=storage_gb_per_unit,
+            notes=notes,
+        )
+    enc = quote(family, safe="")
+    body = {
+        "dc_code": dc_code,
+        "cpu_per_unit": float(cpu_per_unit),
+        "ram_gb_per_unit": float(ram_gb_per_unit),
+        "storage_gb_per_unit": float(storage_gb_per_unit),
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_cust, f"/api/v1/crm/resource-ratios/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_unit_conversions() -> list:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_unit_conversions()
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/unit-conversions")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_unit_conversion(
+    from_unit: str,
+    to_unit: str,
+    *,
+    factor: float,
+    operation: str = "divide",
+    ceil_result: bool = False,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_unit_conversion(
+            from_unit,
+            to_unit,
+            factor=factor,
+            operation=operation,
+            ceil_result=ceil_result,
+            notes=notes,
+        )
+    body = {
+        "factor": float(factor),
+        "operation": operation,
+        "ceil_result": bool(ceil_result),
+        "notes": notes,
+    }
+    try:
+        out = _put_json(
+            _client_cust,
+            f"/api/v1/crm/unit-conversions/{quote(from_unit, safe='')}/{quote(to_unit, safe='')}",
+            body,
+        )
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def delete_unit_conversion(from_unit: str, to_unit: str) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.delete_unit_conversion(from_unit, to_unit)
+    try:
+        out = _delete_json(
+            _client_cust,
+            f"/api/v1/crm/unit-conversions/{quote(from_unit, safe='')}/{quote(to_unit, safe='')}",
+        )
         return out if isinstance(out, dict) else {}
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
         return {}
