@@ -586,6 +586,8 @@ def get_panel_infra_source(panel_key: str, dc_code: str = "*") -> dict[str, Any]
         "allocated_column": "cpu_count",
         "allocated_unit": "vCPU",
         "filter_clause": "datacenter_name ILIKE :dc_pattern",
+        "manual_total": None,
+        "manual_allocated": None,
         "notes": "mock",
         "updated_by": "mock",
         "updated_at": "2026-05-04T00:00:00Z",
@@ -603,6 +605,8 @@ def upsert_panel_infra_source(
     allocated_column: Optional[str] = None,
     allocated_unit: Optional[str] = None,
     filter_clause: Optional[str] = None,
+    manual_total: Optional[float] = None,
+    manual_allocated: Optional[float] = None,
     notes: Optional[str] = None,
 ) -> dict[str, Any]:
     return {
@@ -616,8 +620,22 @@ def upsert_panel_infra_source(
         "allocated_column": allocated_column,
         "allocated_unit": allocated_unit,
         "filter_clause": filter_clause,
+        "manual_total": manual_total,
+        "manual_allocated": manual_allocated,
         "notes": notes,
     }
+
+
+def get_sellable_snapshot_meta(
+    dc_code: str = "*",
+    family: str = "*",
+    clusters: Optional[str] = None,
+) -> dict[str, Any]:
+    return {"computed_at": "2026-05-04T12:00:00Z"}
+
+
+def force_refresh_sellable() -> dict[str, Any]:
+    return {"status": "ok", "metrics_written": 0}
 
 
 def list_resource_ratios() -> list[dict[str, Any]]:

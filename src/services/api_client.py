@@ -841,6 +841,13 @@ def _auranotify_start_date(tr: Optional[dict]) -> str:
     return start_ts.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _auranotify_end_date_iso(tr: Optional[dict]) -> str:
+    from src.utils.time_range import time_range_to_bounds
+
+    _, end_ts = time_range_to_bounds(tr)
+    return end_ts.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def get_customer_availability_bundle(customer_name: str, tr: Optional[dict]) -> dict[str, Any]:
     """AuraNotify: service + VM downtimes and per-VM outage counts for the selected customer."""
     if _is_mock_mode():
@@ -870,7 +877,10 @@ def get_dc_availability_sla_item(dc_code: str, dc_display_name: str, tr: Optiona
     try:
         from src.services import auranotify_client as aura
 
-        items = aura.get_dc_services_availability(_auranotify_start_date(tr))
+        items = aura.get_dc_services_availability(
+            _auranotify_start_date(tr),
+            _auranotify_end_date_iso(tr),
+        )
         for hint in (dc_display_name or "", dc_code or ""):
             it = aura.match_dc_group_item(items, hint)
             if it:
@@ -878,6 +888,48 @@ def get_dc_availability_sla_item(dc_code: str, dc_display_name: str, tr: Optiona
         return None
     except Exception:
         return None
+
+
+def get_dc_availability_sla_items_for_dcs(
+    dc_rows: list[dict[str, Any]],
+    tr: Optional[dict],
+) -> dict[str, Optional[dict[str, Any]]]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_dc_availability_sla_items_for_dcs(dc_rows, tr)
+    from src.services import auranotify_client as aura
+    from src.utils.dc_display import format_dc_display_name
+
+    out: dict[str, Optional[dict[str, Any]]] = {}
+    if not dc_rows:
+        return out
+    try:
+        items = aura.get_dc_services_availability(
+            _auranotify_start_date(tr),
+            _auranotify_end_date_iso(tr),
+        )
+    except Exception:
+        for row in dc_rows:
+            rid = row.get("id")
+            if rid is not None:
+                out[str(rid)] = None
+        return out
+
+    for row in dc_rows:
+        rid = row.get("id")
+        if rid is None:
+            continue
+        sid = str(rid)
+        dc_name = format_dc_display_name(row.get("name"), row.get("description")) or str(row.get("name") or sid)
+        matched: Optional[dict[str, Any]] = None
+        for hint in (dc_name, sid):
+            it = aura.match_dc_group_item(items, hint)
+            if it:
+                matched = it
+                break
+        out[sid] = matched
+    return out
 
 
 def get_crm_service_mapping_pages() -> list:

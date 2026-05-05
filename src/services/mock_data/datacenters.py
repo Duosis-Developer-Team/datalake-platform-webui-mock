@@ -176,7 +176,13 @@ def _power_block(
     storage_cap_tb: float = 0.0,
     storage_used_tb: float = 0.0,
     stor_used_tb: float | None = None,
+    cpu_total_proc_units: float = 0.0,
+    cpu_avail_proc_units: float = 0.0,
+    mem_total_bytes: float = 0.0,
+    mem_avail_bytes: float = 0.0,
+    mem_assigned_bytes: float = 0.0,
 ) -> dict[str, Any]:
+    _ctp = float(cpu_total_proc_units or 0)
     return {
         "hosts": hosts,
         "vms": lpars,
@@ -190,6 +196,12 @@ def _power_block(
         "memory_assigned": mem_assigned,
         "storage_cap_tb": storage_cap_tb,
         "storage_used_tb": stor_used_tb if stor_used_tb is not None else storage_used_tb,
+        "cpu_total_proc_units": _ctp,
+        "cpu_avail_proc_units": float(cpu_avail_proc_units or 0),
+        "cpu_total_cores": _ctp * 8.0,
+        "mem_total_bytes": float(mem_total_bytes or 0),
+        "mem_avail_bytes": float(mem_avail_bytes or 0),
+        "mem_assigned_bytes": float(mem_assigned_bytes or 0),
     }
 
 
@@ -245,6 +257,11 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
             mem_assigned=6100.0,
             storage_cap_tb=120.0,
             storage_used_tb=72.0,
+            cpu_total_proc_units=64.0,
+            cpu_avail_proc_units=8.0,
+            mem_total_bytes=512.0 * (1024.0**3),
+            mem_avail_bytes=128.0 * (1024.0**3),
+            mem_assigned_bytes=384.0 * (1024.0**3),
         ),
         "energy": {
             "total_kw": 420.0,
@@ -296,6 +313,11 @@ _MOCK_DC_DETAILS: dict[str, dict[str, Any]] = {
             mem_assigned=5220.0,
             storage_cap_tb=160.0,
             stor_used_tb=125.0,
+            cpu_total_proc_units=50.0,
+            cpu_avail_proc_units=10.0,
+            mem_total_bytes=640.0 * (1024.0**3),
+            mem_avail_bytes=160.0 * (1024.0**3),
+            mem_assigned_bytes=480.0 * (1024.0**3),
         ),
         "energy": {
             "total_kw": 210.0,

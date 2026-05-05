@@ -2,7 +2,7 @@ from __future__ import annotations
 # Time range utilities for reporting.
 # All screens use a single time range (presets or custom) passed to queries.
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 # Preset keys for UI
 PRESET_1_HOUR = "1h"
@@ -12,6 +12,8 @@ PRESET_30_DAYS = "30d"
 PRESET_CUSTOM = "custom"
 
 DEFAULT_PRESET = PRESET_7_DAYS
+
+MIN_REPORT_YEAR = 2022
 
 
 def _today_utc():
@@ -64,6 +66,25 @@ def previous_month_range():
         "start": first_prev.isoformat(),
         "end": last_prev.isoformat(),
         "preset": "previous_month",
+    }
+
+
+def calendar_year_range(year: int) -> dict:
+    """Jan 1 … Dec 31 for `year`, capped by today for the current year (UTC dates)."""
+    today = _today_utc()
+    cy = int(today.year)
+    y = int(year)
+    if y < MIN_REPORT_YEAR:
+        y = MIN_REPORT_YEAR
+    if y > cy:
+        y = cy
+    start_d = date(y, 1, 1)
+    end_dec = date(y, 12, 31)
+    end_d = min(end_dec, today)
+    return {
+        "start": start_d.isoformat(),
+        "end": end_d.isoformat(),
+        "preset": f"year_{y}",
     }
 
 

@@ -99,6 +99,7 @@ _log = logging.getLogger(__name__)
 _log.info("APP_BUILD_ID=%s", APP_BUILD_ID)
 
 from src.pages import home, datacenters, dc_view, customer_view, query_explorer, global_view, region_drilldown, dc_detail
+from src.pages import availability_annual  # noqa: F401
 from src.pages import login as login_page_mod
 from src.pages.settings import shell as settings_shell
 from src.components.access_denied import build_access_denied
@@ -557,6 +558,8 @@ def render_main_content(pathname, time_range, selected_customer, search):
         return dc_view.build_dc_view(dc_id, tr, visible_sections=vis)
     if pathname == "/global-view":
         return global_view.build_global_view(tr, visible_sections=vis)
+    if pathname == "/availability-annual":
+        return availability_annual.build_availability_annual_layout(visible_sections=vis)
     if pathname == "/customer-view":
         return customer_view.build_customer_layout(tr, selected_customer, visible_sections=vis)
     if pathname == "/query-explorer":

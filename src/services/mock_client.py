@@ -234,6 +234,13 @@ def get_dc_availability_sla_item(
     return mock_sla.get_dc_availability_sla_item(dc_code, dc_display_name, tr)
 
 
+def get_dc_availability_sla_items_for_dcs(
+    dc_rows: list[dict[str, Any]],
+    tr: Optional[dict],
+) -> dict[str, Optional[dict[str, Any]]]:
+    return mock_sla.get_dc_availability_sla_items_for_dcs(dc_rows, tr)
+
+
 # ---------------------------------------------------------------------------
 # CRM operator configuration (customer-api contract)
 # ---------------------------------------------------------------------------
@@ -420,6 +427,8 @@ def put_panel_infra_source(
     allocated_column: Optional[str] = None,
     allocated_unit: Optional[str] = None,
     filter_clause: Optional[str] = None,
+    manual_total: Optional[float] = None,
+    manual_allocated: Optional[float] = None,
     notes: Optional[str] = None,
 ) -> dict[str, Any]:
     return mock_crm.upsert_panel_infra_source(
@@ -432,8 +441,22 @@ def put_panel_infra_source(
         allocated_column=allocated_column,
         allocated_unit=allocated_unit,
         filter_clause=filter_clause,
+        manual_total=manual_total,
+        manual_allocated=manual_allocated,
         notes=notes,
     )
+
+
+def get_sellable_snapshot_meta(
+    dc_code: str = "*",
+    family: str = "*",
+    clusters: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.get_sellable_snapshot_meta(dc_code, family, clusters)
+
+
+def force_refresh_sellable() -> dict[str, Any]:
+    return mock_crm.force_refresh_sellable()
 
 
 def get_resource_ratios() -> list[dict[str, Any]]:

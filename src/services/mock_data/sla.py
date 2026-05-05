@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from src.services.mock_data.datacenters import get_dc_detail
+from src.utils.dc_display import format_dc_display_name
 
 
 def _norm_dc(dc_code: str) -> str:
@@ -25,3 +26,19 @@ def get_dc_availability_sla_item(
         "total_downtime_min": max(0, int((100 - pct) * 6)),
         "categories": [],
     }
+
+
+def get_dc_availability_sla_items_for_dcs(
+    dc_rows: list[dict[str, Any]],
+    tr: dict | None = None,
+) -> dict[str, Optional[dict[str, Any]]]:
+    """One lookup per DC using mock SLA rows (same shape as live batch helper)."""
+    out: dict[str, Optional[dict[str, Any]]] = {}
+    for row in dc_rows:
+        rid = row.get("id")
+        if rid is None:
+            continue
+        sid = str(rid)
+        dc_name = format_dc_display_name(row.get("name"), row.get("description")) or str(row.get("name") or sid)
+        out[sid] = get_dc_availability_sla_item(sid, dc_name, tr)
+    return out

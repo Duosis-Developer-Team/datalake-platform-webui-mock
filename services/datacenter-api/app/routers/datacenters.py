@@ -97,6 +97,20 @@ def hyperconv_compute_filtered(
     return db.get_hyperconv_metrics_filtered(dc_code, selected, tf.to_dict())
 
 
+@router.get("/datacenters/{dc_code}/compute/power", response_model=dict[str, Any])
+def power_compute_filtered(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    clusters: Optional[str] = Query(
+        None,
+        description="Optional CSV — ignored today; IBM Power pool is DC-wide.",
+    ),
+):
+    selected = [c.strip() for c in clusters.split(",") if c.strip()] if clusters else None
+    return db.get_power_metrics_filtered(dc_code, selected, tf.to_dict())
+
+
 @router.get("/datacenters/{dc_code}/physical-inventory", response_model=dict[str, Any])
 def physical_inventory_dc(dc_code: str, db: DatabaseService = Depends(get_db)):
     return db.get_physical_inventory_dc(dc_code)

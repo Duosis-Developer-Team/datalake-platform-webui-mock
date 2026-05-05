@@ -796,6 +796,37 @@ LIMIT 20
             "stor_used": hc_stor_used,
         }
 
+    def get_power_metrics_filtered(
+        self,
+        dc_code: str,
+        selected_clusters: list[str] | None,
+        time_range: dict | None = None,
+    ) -> dict:
+        """IBM Power metrics in the same shape as classic/hyperconv compute endpoints."""
+        _ = selected_clusters
+        full = self.get_dc_details(dc_code, time_range)
+        p = full.get("power") or {}
+        cu = float(p.get("cpu_used") or 0)
+        ca = float(p.get("cpu_assigned") or 0)
+        mt = float(p.get("memory_total") or 0)
+        ma = float(p.get("memory_assigned") or 0)
+        sc = float(p.get("storage_cap_tb") or 0)
+        su = float(p.get("storage_used_tb") or 0)
+        cpu_cap = max(cu, ca)
+        cpu_used = ca
+        if cpu_cap < cpu_used:
+            cpu_cap = cpu_used
+        return {
+            "hosts": int(p.get("hosts") or 0),
+            "vms": int(p.get("vms") or 0),
+            "cpu_cap": round(cpu_cap, 4),
+            "cpu_used": round(cpu_used, 4),
+            "mem_cap": round(mt, 4),
+            "mem_used": round(ma, 4),
+            "stor_cap": round(sc, 6),
+            "stor_used": round(su, 6),
+        }
+
     # ------------------------------------------------------------------
     # Unit normalization & aggregation (shared by single + batch paths)
     # ------------------------------------------------------------------
