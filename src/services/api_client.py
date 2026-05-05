@@ -11,6 +11,7 @@ _API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 DATACENTER_API_URL = os.getenv("DATACENTER_API_URL", _API_BASE).rstrip("/")
 CUSTOMER_API_URL = os.getenv("CUSTOMER_API_URL", _API_BASE).rstrip("/")
 QUERY_API_URL = os.getenv("QUERY_API_URL", _API_BASE).rstrip("/")
+CRM_ENGINE_URL = os.getenv("CRM_ENGINE_URL", CUSTOMER_API_URL).rstrip("/")
 
 _EMPTY_DASHBOARD = {
     "overview": {
@@ -110,6 +111,7 @@ _transport = httpx.HTTPTransport(retries=3)
 _client_dc = httpx.Client(base_url=DATACENTER_API_URL, timeout=30.0, transport=_transport)
 _client_cust = httpx.Client(base_url=CUSTOMER_API_URL, timeout=30.0, transport=_transport)
 _client_query = httpx.Client(base_url=QUERY_API_URL, timeout=30.0, transport=_transport)
+_client_crm = httpx.Client(base_url=CRM_ENGINE_URL, timeout=30.0, transport=_transport)
 
 
 def _is_mock_mode() -> bool:
@@ -161,6 +163,14 @@ def _get_json(client: httpx.Client, path: str, params: Optional[dict[str, str]] 
 def _put_json(client: httpx.Client, path: str, body: dict[str, Any]) -> Any:
     response = client.put(path, json=body, headers=_auth_headers())
     response.raise_for_status()
+    return response.json()
+
+
+def _post_json(client: httpx.Client, path: str, body: Optional[dict[str, Any]] = None) -> Any:
+    response = client.post(path, json=body or {}, headers=_auth_headers())
+    response.raise_for_status()
+    if not response.content:
+        return {}
     return response.json()
 
 
@@ -1305,6 +1315,8 @@ def put_panel_infra_source(
     allocated_column: Optional[str] = None,
     allocated_unit: Optional[str] = None,
     filter_clause: Optional[str] = None,
+    manual_total: Optional[float] = None,
+    manual_allocated: Optional[float] = None,
     notes: Optional[str] = None,
 ) -> dict[str, Any]:
     if _is_mock_mode():
@@ -1320,6 +1332,8 @@ def put_panel_infra_source(
             allocated_column=allocated_column,
             allocated_unit=allocated_unit,
             filter_clause=filter_clause,
+            manual_total=manual_total,
+            manual_allocated=manual_allocated,
             notes=notes,
         )
     enc = quote(panel_key, safe="")
@@ -1332,10 +1346,43 @@ def put_panel_infra_source(
         "allocated_column": allocated_column,
         "allocated_unit": allocated_unit,
         "filter_clause": filter_clause,
+        "manual_total": manual_total,
+        "manual_allocated": manual_allocated,
         "notes": notes,
     }
     try:
         out = _put_json(_client_cust, f"/api/v1/crm/panels/{enc}/infra-source", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_sellable_snapshot_meta(
+    dc_code: str = "*",
+    family: str = "*",
+    clusters: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_sellable_snapshot_meta(dc_code, family, clusters)
+    params: dict[str, str] = {"dc_code": dc_code, "family": family}
+    if clusters:
+        params["clusters"] = clusters
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/sellable-potential/snapshot-meta", params=params)
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def force_refresh_sellable() -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.force_refresh_sellable()
+    try:
+        out = _post_json(_client_cust, "/api/v1/crm/sellable-potential/refresh", {})
         return out if isinstance(out, dict) else {}
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
         return {}
@@ -1450,3 +1497,70 @@ def delete_unit_conversion(from_unit: str, to_unit: str) -> dict[str, Any]:
         return out if isinstance(out, dict) else {}
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
         return {}
+
+
+_HTTP_ERRORS = (
+    httpx.ConnectError,
+    httpx.TimeoutException,
+    httpx.HTTPStatusError,
+    httpx.RemoteProtocolError,
+    ValueError,
+)
+
+_ADMIN_CACHE_REFRESH_PATH = "/api/v1/admin/cache/refresh"
+
+
+def _response_error_detail(resp: httpx.Response) -> Any:
+    try:
+        return resp.json()
+    except Exception:
+        return (resp.text or "")[:800]
+
+
+def refresh_platform_redis_caches() -> dict[str, Any]:
+    """Flush Redis-backed caches on backend services and clear the GUI HTTP response cache."""
+    if _is_mock_mode():
+        from src.services import cache_service as _api_response_cache
+
+        _api_response_cache.clear()
+        return {
+            "services": {
+                "datacenter_api": {"ok": True, "data": {"status": "ok", "cache": {"mode": "mock"}}},
+                "customer_api": {"ok": True, "data": {"status": "ok", "cache": {"mode": "mock"}}},
+                "crm_engine": {"ok": True, "data": {"status": "ok", "cache": {"mode": "mock"}}},
+            },
+            "gui_cache_cleared": True,
+        }
+
+    from src.services import cache_service as _api_response_cache
+
+    timeout = httpx.Timeout(600.0, connect=30.0)
+    headers = _auth_headers()
+    out: dict[str, Any] = {"services": {}, "gui_cache_cleared": False}
+    targets: list[tuple[str, httpx.Client]] = [
+        ("datacenter_api", _client_dc),
+        ("customer_api", _client_cust),
+        ("crm_engine", _client_crm),
+    ]
+    for name, client in targets:
+        try:
+            r = client.post(_ADMIN_CACHE_REFRESH_PATH, headers=headers, timeout=timeout)
+            r.raise_for_status()
+            body = r.json() if r.content else {}
+            out["services"][name] = {"ok": True, "data": body}
+        except httpx.HTTPStatusError as exc:
+            out["services"][name] = {
+                "ok": False,
+                "error": f"HTTP {exc.response.status_code}",
+                "detail": _response_error_detail(exc.response),
+            }
+        except _HTTP_ERRORS as exc:
+            out["services"][name] = {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            out["services"][name] = {"ok": False, "error": str(exc)}
+    try:
+        _api_response_cache.clear()
+        out["gui_cache_cleared"] = True
+    except Exception as exc:
+        out["gui_cache_error"] = str(exc)
+    return out

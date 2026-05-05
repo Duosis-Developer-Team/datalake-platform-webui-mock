@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.services.customer_service import CustomerService
-from app.routers import customers
+from app.routers import admin_cache, customers
 from app.core.redis_client import init_redis_pool, close_redis_pool, redis_is_healthy
 
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +41,7 @@ app.add_middleware(
 )
 
 app.include_router(customers.router, prefix="/api/v1", tags=["customers"])
+app.include_router(admin_cache.router, prefix="/api/v1", tags=["admin"])
 
 
 @app.get("/health", response_model=dict)

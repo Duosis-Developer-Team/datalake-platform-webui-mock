@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.services.dc_service import DatabaseService
 from app.services.scheduler_service import start_scheduler
-from app.routers import datacenters, dashboard
+from app.routers import admin_cache, datacenters, dashboard
 from app.core.redis_client import init_redis_pool, close_redis_pool, redis_is_healthy
 
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +47,7 @@ app.add_middleware(
 
 app.include_router(datacenters.router, prefix="/api/v1", tags=["datacenters"])
 app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard"])
+app.include_router(admin_cache.router, prefix="/api/v1", tags=["admin"])
 
 
 @app.get("/health", response_model=dict)
