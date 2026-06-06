@@ -142,27 +142,26 @@ def get_dc_storage_capacity(dc_code: str, _tr: dict | None = None) -> dict[str, 
         return {"systems": []}
     systems = [
         {
-            "name": f"IBM-FS-{k}-A",
-            "total_mdisk_capacity": "512.00 TB",
-            "total_used_capacity": "318.50 TB",
-            "total_free_space": "193.50 TB",
+            "name": f"IBM9500{k.replace('-', '')}",
+            "topology": "hyperswap",
+            "layer": "storage",
+            "physical_capacity": "1460.55 TB",
+            "physical_free_capacity": "807.80 TB",
+            "total_mdisk_capacity": "1600.00 TB",
+            "total_used_capacity": "652.75 TB",
+            "total_free_space": "947.25 TB",
         },
         {
-            "name": f"IBM-FS-{k}-B",
-            "total_mdisk_capacity": "256.00 TB",
-            "total_used_capacity": "142.00 TB",
-            "total_free_space": "114.00 TB",
+            "name": f"IBMR19500{k.replace('-', '')}",
+            "topology": "standard",
+            "layer": "replication",
+            "physical_capacity": "1451.00 TB",
+            "physical_free_capacity": "454.20 TB",
+            "total_mdisk_capacity": "1520.00 TB",
+            "total_used_capacity": "996.80 TB",
+            "total_free_space": "523.20 TB",
         },
     ]
-    if k == "IST-DC1":
-        systems.append(
-            {
-                "name": "NetApp-IST-01",
-                "total_mdisk_capacity": "128.00 TB",
-                "total_used_capacity": "61.00 TB",
-                "total_free_space": "67.00 TB",
-            }
-        )
     return {"systems": systems}
 
 

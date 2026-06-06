@@ -330,6 +330,29 @@ def get_customer_s3_vaults(customer_name: str, tr: Optional[dict]) -> dict:
         return {"vaults": [], "latest": {}, "growth": {}}
 
 
+def get_crm_accounts_with_orders() -> list:
+    """Aligned with Datalake-Platform-GUI: CRM accounts that have sales orders."""
+    if _is_mock_mode():
+        return []
+    try:
+        data = _get_json(_client_cust, "/api/v1/crm/accounts/with-orders")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_customer_all_orders(name: str) -> list:
+    """Aligned with Datalake-Platform-GUI: all CRM sales orders with line usage hints."""
+    if _is_mock_mode():
+        return []
+    try:
+        enc = quote(name, safe="")
+        data = _get_json(_client_cust, f"/api/v1/customers/{enc}/sales/all-orders")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
 def get_dc_netbackup_pools(dc_code: str, tr: Optional[dict]) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
