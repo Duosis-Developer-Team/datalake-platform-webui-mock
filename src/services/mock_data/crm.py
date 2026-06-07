@@ -688,3 +688,43 @@ def upsert_unit_conversion(
 
 def delete_unit_conversion(from_unit: str, to_unit: str) -> dict[str, Any]:
     return {"status": "ok", "rows_deleted": 1, "from_unit": from_unit, "to_unit": to_unit}
+
+
+def customer_sales_summary(_customer_name: str) -> dict[str, Any]:
+    """Mock payload aligned with customer-api SalesSummary (YTD + lifetime)."""
+    return {
+        "ytd_revenue_total": 125000.0,
+        "invoice_count": 3,
+        "currency": "TRY",
+        "lifetime_revenue_total": 480000.0,
+        "lifetime_order_count": 11,
+        "pipeline_value": 0.0,
+        "opportunity_count": 0,
+        "active_order_count": 1,
+        "active_order_value": 15000.0,
+        "active_contract_count": 0,
+        "total_contract_value": 0.0,
+        "estimated_mrr": 0.0,
+    }
+
+
+def customer_sales_service_breakdown(_customer_name: str) -> list[dict[str, Any]]:
+    return [
+        {"service_code": "virt_hyperconverged", "service_label": "Hyperconverged", "amount_tl": 82000.0},
+        {"service_code": "backup_veeam", "service_label": "Veeam backup", "amount_tl": 43000.0},
+    ]
+
+
+def customer_sales_items(_customer_name: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "source_type": "salesorder",
+            "reference_number": "PRJ-MOCK-001",
+            "date": "2026-03-18",
+            "status": "Fulfilled",
+            "product_name": "Hyperconverged Mimari Intel RAM",
+            "quantity": 16.0,
+            "line_total": 42000.0,
+            "currency": "TRY",
+        }
+    ]

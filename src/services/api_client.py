@@ -353,6 +353,45 @@ def get_customer_all_orders(name: str) -> list:
         return []
 
 
+def get_customer_sales_summary(name: str) -> dict:
+    if _is_mock_mode():
+        from src.services.mock_data import crm as mock_crm
+
+        return mock_crm.customer_sales_summary(name)
+    try:
+        enc = quote(name, safe="")
+        data = _get_json(_client_cust, f"/api/v1/customers/{enc}/sales/summary")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_customer_sales_items(name: str) -> list:
+    if _is_mock_mode():
+        from src.services.mock_data import crm as mock_crm
+
+        return mock_crm.customer_sales_items(name)
+    try:
+        enc = quote(name, safe="")
+        data = _get_json(_client_cust, f"/api/v1/customers/{enc}/sales/items")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_customer_sales_service_breakdown(name: str) -> list:
+    if _is_mock_mode():
+        from src.services.mock_data import crm as mock_crm
+
+        return mock_crm.customer_sales_service_breakdown(name)
+    try:
+        enc = quote(name, safe="")
+        data = _get_json(_client_cust, f"/api/v1/customers/{enc}/sales/service-breakdown")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
 def get_dc_netbackup_pools(dc_code: str, tr: Optional[dict]) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
