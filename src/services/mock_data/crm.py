@@ -758,7 +758,7 @@ def customer_catalog() -> dict[str, Any]:
                 "mapping_status": "seed",
                 "mapping_count": 1,
                 "real_data_cached": False,
-                "overuse_status": "pending",
+                "overuse_status": "overuse",
                 "ytd_revenue": 125000.0,
                 "active_order_value": 15000.0,
                 "active_order_count": 1,
@@ -770,6 +770,73 @@ def customer_catalog() -> dict[str, Any]:
             "vip": [],
             "mapped": [],
             "unmapped": [],
+        },
+    }
+
+
+def customer_resource_compliance(_customer_name: str, scope: str = "virtualization") -> dict[str, Any]:
+    """ASELSANNET-style mock: hyperconverged overage + classic unsold usage."""
+    if scope != "virtualization":
+        return {"scope": scope, "rows": [], "summary": {"total_overage_loss_tl": 0.0, "has_overuse": False, "overuse_categories": [], "overuse_status": "ok"}}
+    rows = [
+        {
+            "category_code": "virt_hyperconverged_cpu",
+            "category_label": "Hyperconverged Mimari — CPU",
+            "gui_tab_binding": "virtualization.hyperconverged",
+            "resource_unit": "vCPU",
+            "entitled_qty": 18.0,
+            "entitled_amount_tl": 1899.12,
+            "used_qty": 550.0,
+            "overage_qty": 532.0,
+            "unit_price_tl": 105.57,
+            "price_source": "order_weighted",
+            "overage_loss_tl": round(532.0 * 105.57, 2),
+            "efficiency_pct": round(550.0 / 18.0 * 100.0, 2),
+            "status": "over",
+            "usage_note": None,
+        },
+        {
+            "category_code": "virt_hyperconverged_ram",
+            "category_label": "Hyperconverged Mimari — RAM",
+            "gui_tab_binding": "virtualization.hyperconverged",
+            "resource_unit": "GB",
+            "entitled_qty": 128.0,
+            "entitled_amount_tl": 7717.12,
+            "used_qty": 1996.8,
+            "overage_qty": 1868.8,
+            "unit_price_tl": 60.29,
+            "price_source": "order_weighted",
+            "overage_loss_tl": round(1868.8 * 60.29, 2),
+            "efficiency_pct": round(1996.8 / 128.0 * 100.0, 2),
+            "status": "over",
+            "usage_note": None,
+        },
+        {
+            "category_code": "virt_classic_cpu",
+            "category_label": "Klasik Mimari (KM) — CPU",
+            "gui_tab_binding": "virtualization.classic",
+            "resource_unit": "vCPU",
+            "entitled_qty": 0.0,
+            "entitled_amount_tl": 0.0,
+            "used_qty": 42.0,
+            "overage_qty": 42.0,
+            "unit_price_tl": 50.0,
+            "price_source": "catalog_name",
+            "overage_loss_tl": 2100.0,
+            "efficiency_pct": None,
+            "status": "unsold_usage",
+            "usage_note": None,
+        },
+    ]
+    total_loss = round(sum(float(r["overage_loss_tl"]) for r in rows), 2)
+    return {
+        "scope": scope,
+        "rows": rows,
+        "summary": {
+            "total_overage_loss_tl": total_loss,
+            "has_overuse": True,
+            "overuse_categories": [r["category_code"] for r in rows if r["status"] in ("over", "unsold_usage")],
+            "overuse_status": "overuse",
         },
     }
 
