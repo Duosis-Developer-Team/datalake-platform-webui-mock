@@ -744,6 +744,36 @@ def customer_sales_active_orders(_customer_name: str) -> list[dict[str, Any]]:
     ]
 
 
+def customer_catalog() -> dict[str, Any]:
+    """Mock catalog row with active order fields for /customers page."""
+    return {
+        "customers": [
+            {
+                "crm_accountid": "00000000-0000-0000-0000-00000000ACC1",
+                "crm_account_name": "Mock Customer A",
+                "display_name": "Mock Customer A",
+                "is_vip": False,
+                "cache_pinned": False,
+                "mapped": True,
+                "mapping_status": "seed",
+                "mapping_count": 1,
+                "real_data_cached": False,
+                "overuse_status": "pending",
+                "ytd_revenue": 125000.0,
+                "active_order_value": 15000.0,
+                "active_order_count": 1,
+                "currency": "TRY",
+                "list_group": "mapped",
+            }
+        ],
+        "groups": {
+            "vip": [],
+            "mapped": [],
+            "unmapped": [],
+        },
+    }
+
+
 def customer_sales_active_items(_customer_name: str) -> list[dict[str, Any]]:
     return [
         {
