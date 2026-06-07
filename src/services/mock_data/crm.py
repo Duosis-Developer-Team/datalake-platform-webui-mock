@@ -728,3 +728,44 @@ def customer_sales_items(_customer_name: str) -> list[dict[str, Any]]:
             "currency": "TRY",
         }
     ]
+
+
+def customer_sales_active_orders(_customer_name: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "source_type": "salesorder",
+            "reference_number": "PRJ-MOCK-OPEN-001",
+            "date": "2026-05-01",
+            "status": "Active",
+            "order_total": 15000.0,
+            "line_count": 2,
+            "currency": "TRY",
+        }
+    ]
+
+
+def customer_sales_active_items(_customer_name: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "source_type": "salesorder",
+            "reference_number": "PRJ-MOCK-OPEN-001",
+            "date": "2026-05-01",
+            "status": "Active",
+            "product_name": "Managed backup storage",
+            "quantity": 500.0,
+            "unit_price": 20.0,
+            "line_total": 10000.0,
+            "currency": "TRY",
+        },
+        {
+            "source_type": "salesorder",
+            "reference_number": "PRJ-MOCK-OPEN-001",
+            "date": "2026-05-01",
+            "status": "Active",
+            "product_name": "Monitoring per VM",
+            "quantity": 50.0,
+            "unit_price": 100.0,
+            "line_total": 5000.0,
+            "currency": "TRY",
+        },
+    ]
