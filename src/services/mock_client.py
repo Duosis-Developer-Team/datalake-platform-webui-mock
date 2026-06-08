@@ -19,6 +19,7 @@ from src.services.mock_data import sla as mock_sla
 from src.services.mock_data import storage as mock_storage
 from src.services.mock_data import virtualization as mock_virt
 from src.services.mock_data import crm as mock_crm
+from src.services.mock_data import netbox_config as mock_netbox
 
 
 def get_global_dashboard(tr: Optional[dict]) -> dict:
@@ -349,3 +350,30 @@ def put_crm_service_mapping(productid: str, *, page_key: str, notes: Optional[st
 
 def delete_crm_service_mapping_override(productid: str) -> dict[str, Any]:
     return mock_crm.delete_service_mapping_override(productid)
+
+
+def get_netbox_device_roles() -> list[dict[str, Any]]:
+    return mock_netbox.get_device_roles()
+
+
+def get_netbox_viz_exclusions() -> list[dict[str, Any]]:
+    return mock_netbox.list_exclusions()
+
+
+def put_netbox_viz_exclusion(
+    *,
+    view_scope: str,
+    dimension_value: str,
+    dimension: str = "device_role",
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_netbox.upsert_exclusion(
+        view_scope=view_scope,
+        dimension=dimension,
+        dimension_value=dimension_value,
+        notes=notes,
+    )
+
+
+def delete_netbox_viz_exclusion(exclusion_id: int) -> dict[str, Any]:
+    return mock_netbox.delete_exclusion(exclusion_id)
