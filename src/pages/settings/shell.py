@@ -19,6 +19,7 @@ from src.pages.settings.iam import users as users_page
 from src.pages.settings.integrations import auranotify as auranotify_page
 from src.pages.settings.integrations import ldap as ldap_page
 from src.pages.settings.integrations import overview as integrations_overview_page
+from src.pages.settings.integrations import netbox_visualization as netbox_visualization_page
 
 # (href, label, permission code)
 IAM_TABS: list[tuple[str, str, str]] = [
@@ -32,6 +33,7 @@ IAM_TABS: list[tuple[str, str, str]] = [
 
 INT_TABS: list[tuple[str, str, str]] = [
     ("/settings/integrations", "Overview", "page:settings_integrations"),
+    ("/settings/integrations/netbox/visualization", "NetBox / Loki", "page:settings_netbox_visualization"),
     ("/settings/integrations/ldap", "LDAP", "page:settings_ldap"),
     ("/settings/integrations/auranotify", "AuraNotify", "page:settings_auranotify"),
 ]
@@ -61,6 +63,10 @@ _PAGE_BUILDERS: dict[str, tuple[str, Callable[..., html.Div]]] = {
     "/settings/integrations": ("page:settings_integrations", integrations_overview_page.build_layout),
     "/settings/integrations/ldap": ("page:settings_ldap", ldap_page.build_layout),
     "/settings/integrations/auranotify": ("page:settings_auranotify", auranotify_page.build_layout),
+    "/settings/integrations/netbox/visualization": (
+        "page:settings_netbox_visualization",
+        netbox_visualization_page.build_layout,
+    ),
 }
 
 

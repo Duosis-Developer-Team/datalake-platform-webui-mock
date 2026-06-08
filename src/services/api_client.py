@@ -1639,6 +1639,74 @@ def delete_unit_conversion(from_unit: str, to_unit: str) -> dict[str, Any]:
         return {}
 
 
+def get_netbox_device_roles() -> list[dict[str, Any]]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_netbox_device_roles()
+    try:
+        data = _get_json(_client_dc, "/api/v1/netbox/device-roles")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def get_netbox_viz_exclusions() -> list[dict[str, Any]]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_netbox_viz_exclusions()
+    try:
+        data = _get_json(_client_cust, "/api/v1/netbox/config/visualization-exclusions")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def put_netbox_viz_exclusion(
+    *,
+    view_scope: str,
+    dimension_value: str,
+    dimension: str = "device_role",
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_netbox_viz_exclusion(
+            view_scope=view_scope,
+            dimension_value=dimension_value,
+            dimension=dimension,
+            notes=notes,
+        )
+    body = {
+        "view_scope": view_scope,
+        "dimension": dimension,
+        "dimension_value": dimension_value,
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_cust, "/api/v1/netbox/config/visualization-exclusions", body)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def delete_netbox_viz_exclusion(exclusion_id: int) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.delete_netbox_viz_exclusion(exclusion_id)
+    try:
+        out = _delete_json(
+            _client_cust,
+            f"/api/v1/netbox/config/visualization-exclusions/{exclusion_id}",
+        )
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
 _HTTP_ERRORS = (
     httpx.ConnectError,
     httpx.TimeoutException,
