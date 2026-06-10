@@ -1,5 +1,24 @@
-from __future__ import annotations
+import math
+
 import plotly.graph_objects as go
+
+# J1. Global Premium Theme
+_PREMIUM_FONT = dict(
+    family="DM Sans, sans-serif",
+    color="#2B3674",
+    size=12,
+)
+
+_PREMIUM_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=_PREMIUM_FONT,
+    hoverlabel=dict(
+        bgcolor="rgba(255,255,255,0.97)",
+        bordercolor="rgba(67, 24, 255, 0.12)",
+        font=dict(family="DM Sans", size=12, color="#2B3674"),
+    ),
+)
 
 _LEGEND_STYLE = dict(
     orientation="h",
@@ -107,14 +126,15 @@ def create_usage_donut_chart(value, label, color="#4318FF"):
         direction="clockwise",
     )])
 
+    text_val = f"{val:.1f}%" if val < 10 else f"<b>{int(val)}%</b>"
     fig.update_layout(
         annotations=[dict(
-            text=f"<b>{int(val)}%</b>",
+            text=text_val,
             x=0.5,
             y=0.5,
             xanchor="center",
             yanchor="middle",
-            font=dict(size=28, color="#2B3674", family="DM Sans"),
+            font=dict(size=32, color="#1a1b41", family="DM Sans"),
             showarrow=False,
         )],
         title=dict(
@@ -295,6 +315,115 @@ def create_grouped_bar_chart(labels, series_dict, title, height=380):
     return fig
 
 
+def create_storage_breakdown_chart(labels, used_series, free_series, height=None):
+    """
+    Premium stacked horizontal bar chart for storage capacity breakdown.
+    Each row = one storage system; bar split into Used (indigo) + Free (light).
+    Values displayed as TB/PB labels inside bars when space permits.
+    """
+    from src.utils.format_units import smart_storage as _smart
+
+    n = len(labels)
+    computed_height = max(120, n * 64 + 80) if height is None else height
+
+    used_text = [_smart(v) if v >= 10 else "" for v in used_series]
+    free_text = [_smart(v) if v >= 10 else "" for v in free_series]
+
+    fig = go.Figure()
+
+    # Used — indigo solid
+    fig.add_trace(go.Bar(
+        y=labels,
+        x=used_series,
+        name="Used",
+        orientation="h",
+        marker=dict(color="#4318FF", opacity=0.90),
+        text=used_text,
+        textposition="inside",
+        insidetextanchor="middle",
+        textfont=dict(family="DM Sans", size=11, color="rgba(255,255,255,0.9)"),
+        hovertemplate="<b>%{y}</b><br>Used: %{customdata}<extra></extra>",
+        customdata=[_smart(v) for v in used_series],
+    ))
+
+    # Free — soft indigo/grey
+    fig.add_trace(go.Bar(
+        y=labels,
+        x=free_series,
+        name="Free",
+        orientation="h",
+        marker=dict(color="#E9EDF7", opacity=1.0),
+        text=free_text,
+        textposition="inside",
+        insidetextanchor="middle",
+        textfont=dict(family="DM Sans", size=11, color="#A3AED0"),
+        hovertemplate="<b>%{y}</b><br>Free: %{customdata}<extra></extra>",
+        customdata=[_smart(v) for v in free_series],
+    ))
+
+    # Usage % annotation on the right of each bar
+    totals = [u + f for u, f in zip(used_series, free_series)]
+    for i, (lbl, u, t) in enumerate(zip(labels, used_series, totals)):
+        pct = (u / t * 100) if t > 0 else 0
+        color = "#EE5D50" if pct >= 80 else "#FFB547" if pct >= 60 else "#05CD99"
+        fig.add_annotation(
+            x=t,
+            y=lbl,
+            text=f"<b>{pct:.1f}%</b>",
+            showarrow=False,
+            xanchor="left",
+            xshift=8,
+            font=dict(family="DM Sans", size=12, color=color),
+            xref="x",
+            yref="y",
+        )
+
+    fig.update_layout(
+        barmode="stack",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(family="DM Sans", size=12, color="#2B3674"),
+            bgcolor="rgba(0,0,0,0)",
+            traceorder="normal",
+        ),
+        margin=dict(l=10, r=60, t=30, b=10),
+        height=computed_height,
+        bargap=0.3,
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            range=[0, max(totals) * 1.12] if totals else [0, 1],
+        ),
+        yaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            tickfont=dict(family="DM Sans", size=13, color="#2B3674", weight=600),
+            autorange="reversed",
+        ),
+        hoverlabel=dict(
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor="rgba(67,24,255,0.2)",
+            font=dict(family="DM Sans", size=12, color="#2B3674"),
+        ),
+        font=dict(family="DM Sans", color="#A3AED0"),
+    )
+
+    try:
+        fig.update_traces(marker_cornerradius=6)
+    except Exception:
+        pass
+
+    return fig
+
+
 def create_horizontal_bar_chart(labels, values, title, color="#4318FF", height=340, show_legend=True):
     """Executive horizontal bar chart (single series)."""
     labels = labels or []
@@ -350,6 +479,107 @@ def create_horizontal_bar_chart(labels, values, title, color="#4318FF", height=3
     return fig
 
 
+def create_premium_horizontal_bar_chart(
+    labels, values, title, unit_suffix="Gbps", height=340, show_legend=True
+):
+    """
+    Premium horizontal bar chart.
+    - Color gradient by value (low=lavender, high=indigo)
+    - Value labels on the right of each bar
+    - Rounded corners, hover with interface + value
+    """
+    labels = labels or []
+    values = values or []
+    x_data = [float(v or 0) for v in values]
+
+    if not x_data:
+        fig = go.Figure()
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            margin=dict(l=10, r=90, t=10, b=10),
+            height=height,
+            annotations=[
+                dict(
+                    text="No data",
+                    xref="paper",
+                    yref="paper",
+                    x=0.5,
+                    y=0.5,
+                    showarrow=False,
+                    font=dict(family="DM Sans", size=14, color="#A3AED0"),
+                )
+            ],
+        )
+        return fig
+
+    max_val = max(x_data) or 1.0
+
+    norm = [v / max_val for v in x_data]
+
+    def lerp_hex(t):
+        r = int(0xC4 + (0x43 - 0xC4) * t)
+        g = int(0xB5 + (0x18 - 0xB5) * t)
+        b = int(0xFD + (0xFF - 0xFD) * t)
+        return f"#{r:02X}{g:02X}{b:02X}"
+
+    bar_colors = [lerp_hex(n) for n in norm]
+    text_labels = [f"{v:.2f} {unit_suffix}" if v > 0 else "" for v in x_data]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            y=labels,
+            x=x_data,
+            orientation="h",
+            marker=dict(
+                color=bar_colors,
+                opacity=1.0,
+                line=dict(color="rgba(0,0,0,0)", width=0),
+            ),
+            text=text_labels,
+            textposition="outside",
+            textfont=dict(size=11, color="#2B3674", family="DM Sans", weight=600),
+            hovertemplate="<b>%{y}</b><br>P95: <b>%{x:.3f} " + unit_suffix + "</b><extra></extra>",
+            name="",
+        )
+    )
+
+    try:
+        fig.update_traces(marker_cornerradius=8)
+    except Exception:
+        pass
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        margin=dict(l=10, r=90, t=10, b=10),
+        height=height,
+        bargap=0.30,
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            range=[0, max_val * 1.30],
+        ),
+        yaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            tickfont=dict(family="DM Sans", size=12, color="#2B3674", weight=600),
+            categoryorder="total ascending",
+        ),
+        font=dict(family="DM Sans", color="#A3AED0"),
+        hoverlabel=dict(
+            bgcolor="rgba(255,255,255,0.97)",
+            bordercolor="rgba(67, 24, 255, 0.15)",
+            font=dict(family="DM Sans", size=12, color="#2B3674"),
+        ),
+    )
+    return fig
+
+
 def create_capacity_area_chart(timestamps, used, total, title, height=260, show_legend=True):
     """
     Capacity planning trend chart.
@@ -366,6 +596,7 @@ def create_capacity_area_chart(timestamps, used, total, title, height=260, show_
         else:
             y_pct.append(0.0)
 
+    # A1. Dynamic Y-axis zoom around data
     if y_pct:
         y_min = max(0.0, min(y_pct) - 8.0)
         y_max = min(105.0, max(y_pct) + 5.0)
@@ -385,12 +616,20 @@ def create_capacity_area_chart(timestamps, used, total, title, height=260, show_
                 shape="spline",
                 smoothing=1.3,
             ),
+            fillgradient=dict(
+                type="vertical",
+                colorscale=[
+                    [0.0, "rgba(67, 24, 255, 0.18)"],
+                    [1.0, "rgba(67, 24, 255, 0.01)"],
+                ],
+            ),
             fillcolor="rgba(67, 24, 255, 0.10)",
             hovertemplate="<b>%{x|%b %d, %Y}</b><br>Utilization: <b>%{y:.1f}%</b><extra></extra>",
             name="Utilization %",
         )
     )
 
+    # A2. Last point marker — "current value" highlight
     if x and y_pct:
         fig.add_trace(
             go.Scatter(
@@ -408,6 +647,7 @@ def create_capacity_area_chart(timestamps, used, total, title, height=260, show_
             )
         )
 
+    # M2. 80% threshold reference line
     fig.add_hline(
         y=80,
         line_dash="dot",
@@ -425,6 +665,24 @@ def create_capacity_area_chart(timestamps, used, total, title, height=260, show_
         ),
     )
 
+    # A3. Daily vertical separator lines
+    if x:
+        seen_days: set = set()
+        for ts in x:
+            try:
+                day = ts[:10] if isinstance(ts, str) else ts.strftime("%Y-%m-%d")
+                if day not in seen_days:
+                    seen_days.add(day)
+                    fig.add_vline(
+                        x=ts,
+                        line_dash="dot",
+                        line_color="rgba(163, 174, 208, 0.25)",
+                        line_width=1,
+                    )
+            except Exception:
+                pass
+
+    # A5. Annotation — current usage value (top-left)
     if y_pct:
         current_val = y_pct[-1]
         color_val = "#05CD99" if current_val < 60 else "#FFB547" if current_val < 80 else "#EE5D50"
@@ -490,13 +748,16 @@ def create_capacity_area_chart(timestamps, used, total, title, height=260, show_
 
 
 def create_gauge_chart(value, max_value, title, color="#4318FF", height=200):
-    """Gauge (indicator) for usage: value / max_value as percentage."""
+    """Gauge (indicator) for usage: value / max_value as percentage.
+    Pass title='' to suppress the built-in label (use _gauge_wrap in dc_view instead).
+    height kept for backward-compat but the container drives final size."""
     try:
         val = float(value)
         mx = float(max_value) if max_value else 100
     except (TypeError, ValueError):
         val, mx = 0, 100
     pct = (val / mx * 100) if mx > 0 else 0
+    has_title = bool(title)
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=pct,
@@ -511,59 +772,80 @@ def create_gauge_chart(value, max_value, title, color="#4318FF", height=200):
             ],
             "threshold": {"line": {"color": "#2B3674", "width": 4}, "value": 90},
         },
-        title={"text": title.upper(), "font": dict(size=13, color="#A3AED0", family="DM Sans")},
+        title={"text": title.upper() if has_title else "", "font": dict(size=13, color="#A3AED0", family="DM Sans")},
     ))
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=20, r=20, t=40, b=20),
-        height=height,
+        margin=dict(l=10, r=10, t=8 if not has_title else 40, b=10),
+        autosize=True,
         font=dict(family="DM Sans", color="#A3AED0"),
     )
     return fig
 
 
-def create_premium_gauge_chart(pct_value, title, color="#4318FF", height=220, show_threshold=True):
-    """Premium semi-circle gauge chart using percentage value directly."""
+def create_premium_gauge_chart(
+    pct_value,
+    title,
+    color="#4318FF",
+    height=200,
+    show_threshold=True,
+    allow_over_100=False,
+):
+    """Premium semi-circle gauge chart using percentage value directly.
+    Pass title='' to suppress the built-in label (use _gauge_wrap in dc_view instead)."""
     try:
         pct = float(pct_value)
     except (TypeError, ValueError):
         pct = 0.0
+    has_title = bool(title)
     step_mid = f"rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.3)" if color.startswith("#") and len(color) == 7 else "rgba(67,24,255,0.3)"
+    axis_max = 100.0
+    if allow_over_100 and pct > 100:
+        axis_max = float(max(100, math.ceil(pct / 50) * 50))
     gauge_cfg = {
-        "axis": {"range": [0, 100], "nticks": 5, "tickfont": {"size": 8, "color": "#A3AED0", "family": "DM Sans"}, "ticklen": 3, "tickwidth": 1},
+        "axis": {
+            "range": [0, axis_max],
+            "nticks": 5,
+            "tickfont": {"size": 8, "color": "#A3AED0", "family": "DM Sans"},
+            "ticklen": 3,
+            "tickwidth": 1,
+        },
         "bar": {"color": color},
         "steps": [
-            {"range": [0, 50], "color": "#E9EDF7"},
-            {"range": [50, 80], "color": step_mid},
-            {"range": [80, 100], "color": "rgba(238, 93, 80, 0.3)"},
+            {"range": [0, axis_max * 0.5], "color": "#E9EDF7"},
+            {"range": [axis_max * 0.5, axis_max * 0.8], "color": step_mid},
+            {"range": [axis_max * 0.8, axis_max], "color": "rgba(238, 93, 80, 0.3)"},
         ],
     }
-    if show_threshold:
+    if show_threshold and axis_max <= 100:
         gauge_cfg["threshold"] = {"line": {"color": "#2B3674", "width": 4}, "value": 90}
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=pct,
         number={"suffix": "%", "font": {"size": 36, "color": "#2B3674", "family": "DM Sans", "weight": 900}},
         gauge=gauge_cfg,
-        title={"text": title, "font": {"size": 13, "color": "#A3AED0", "family": "DM Sans"}},
+        title={"text": title if has_title else "", "font": {"size": 13, "color": "#A3AED0", "family": "DM Sans"}},
     ))
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=20, r=20, t=44, b=20),
+        margin=dict(l=10, r=10, t=8 if not has_title else 44, b=10),
         height=height,
         font=dict(family="DM Sans", color="#A3AED0"),
     )
     return fig
 
 
-def create_premium_gauge_with_avg(avg_pct, max_pct, title, color="#4318FF", height=220):
-    """Premium semi-circle gauge showing peak value with avg annotation below."""
+def create_premium_gauge_with_avg(avg_pct, max_pct, title, color="#4318FF", height=200):
+    """Premium semi-circle gauge showing peak value with avg annotation below.
+    Pass title='' to suppress the built-in label (use _gauge_wrap in dc_view instead)."""
     try:
         avg = float(avg_pct)
         mx = float(max_pct)
     except (TypeError, ValueError):
         avg, mx = 0.0, 0.0
+    has_title = bool(title)
     step_mid = f"rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.3)" if color.startswith("#") and len(color) == 7 else "rgba(67,24,255,0.3)"
+    title_text = f"{title}<br><span style='font-size:11px;color:#A3AED0'>avg {int(avg)}%</span>" if has_title else ""
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=mx,
@@ -578,198 +860,14 @@ def create_premium_gauge_with_avg(avg_pct, max_pct, title, color="#4318FF", heig
             ],
             "threshold": {"line": {"color": "#2B3674", "width": 4}, "value": 90},
         },
-        title={"text": f"{title}<br><span style='font-size:11px;color:#A3AED0'>avg {int(avg)}%</span>", "font": {"size": 13, "color": "#A3AED0", "family": "DM Sans"}},
+        title={"text": title_text, "font": {"size": 13, "color": "#A3AED0", "family": "DM Sans"}},
     ))
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=20, r=20, t=44, b=20),
-        height=height,
+        margin=dict(l=10, r=10, t=8 if not has_title else 44, b=10),
+        autosize=True,
         font=dict(family="DM Sans", color="#A3AED0"),
     )
-    return fig
-
-
-def create_premium_horizontal_bar_chart(
-    labels, values, title, unit_suffix="Gbps", height=340, show_legend=True
-):
-    """
-    Premium horizontal bar chart.
-    - Color gradient by value (low=lavender, high=indigo)
-    - Value labels on the right of each bar
-    - Rounded corners, hover with interface + value
-    """
-    labels = labels or []
-    values = values or []
-    x_data = [float(v or 0) for v in values]
-
-    max_val = max(x_data) or 1.0
-    norm = [v / max_val for v in x_data]
-
-    def lerp_hex(t):
-        r = int(0xC4 + (0x43 - 0xC4) * t)
-        g = int(0xB5 + (0x18 - 0xB5) * t)
-        b = int(0xFD + (0xFF - 0xFD) * t)
-        return f"#{r:02X}{g:02X}{b:02X}"
-
-    bar_colors = [lerp_hex(n) for n in norm]
-    text_labels = [f"{v:.2f} {unit_suffix}" if v > 0 else "" for v in x_data]
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            y=labels,
-            x=x_data,
-            orientation="h",
-            marker=dict(
-                color=bar_colors,
-                opacity=1.0,
-                line=dict(color="rgba(0,0,0,0)", width=0),
-            ),
-            text=text_labels,
-            textposition="outside",
-            textfont=dict(size=11, color="#2B3674", family="DM Sans", weight=600),
-            hovertemplate="<b>%{y}</b><br>P95: <b>%{x:.3f} " + unit_suffix + "</b><extra></extra>",
-            name="",
-        )
-    )
-
-    try:
-        fig.update_traces(marker_cornerradius=8)
-    except Exception:
-        pass
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=False,
-        margin=dict(l=10, r=90, t=10, b=10),
-        height=height,
-        bargap=0.30,
-        xaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            showticklabels=False,
-            range=[0, max_val * 1.30],
-        ),
-        yaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(family="DM Sans", size=12, color="#2B3674", weight=600),
-            categoryorder="total ascending",
-        ),
-        font=dict(family="DM Sans", color="#A3AED0"),
-        hoverlabel=dict(
-            bgcolor="rgba(255,255,255,0.97)",
-            bordercolor="rgba(67, 24, 255, 0.15)",
-            font=dict(family="DM Sans", size=12, color="#2B3674"),
-        ),
-    )
-    return fig
-
-
-def create_storage_breakdown_chart(labels, used_series, free_series, height=None):
-    """
-    Premium stacked horizontal bar chart for storage capacity breakdown.
-    Each row = one storage system; bar split into Used (indigo) + Free (light).
-    Values displayed as TB/PB labels inside bars when space permits.
-    """
-    from src.utils.format_units import smart_storage as _smart
-
-    n = len(labels)
-    computed_height = max(120, n * 64 + 80) if height is None else height
-
-    used_text = [_smart(v) if v >= 10 else "" for v in used_series]
-    free_text = [_smart(v) if v >= 10 else "" for v in free_series]
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Bar(
-        y=labels,
-        x=used_series,
-        name="Used",
-        orientation="h",
-        marker=dict(color="#4318FF", opacity=0.90),
-        text=used_text,
-        textposition="inside",
-        insidetextanchor="middle",
-        textfont=dict(family="DM Sans", size=11, color="rgba(255,255,255,0.9)"),
-        hovertemplate="<b>%{y}</b><br>Used: %{customdata}<extra></extra>",
-        customdata=[_smart(v) for v in used_series],
-    ))
-
-    fig.add_trace(go.Bar(
-        y=labels,
-        x=free_series,
-        name="Free",
-        orientation="h",
-        marker=dict(color="#E9EDF7", opacity=1.0),
-        text=free_text,
-        textposition="inside",
-        insidetextanchor="middle",
-        textfont=dict(family="DM Sans", size=11, color="#A3AED0"),
-        hovertemplate="<b>%{y}</b><br>Free: %{customdata}<extra></extra>",
-        customdata=[_smart(v) for v in free_series],
-    ))
-
-    totals = [u + f for u, f in zip(used_series, free_series)]
-    for i, (lbl, u, t) in enumerate(zip(labels, used_series, totals)):
-        pct = (u / t * 100) if t > 0 else 0
-        color = "#EE5D50" if pct >= 80 else "#FFB547" if pct >= 60 else "#05CD99"
-        fig.add_annotation(
-            x=t,
-            y=lbl,
-            text=f"<b>{pct:.1f}%</b>",
-            showarrow=False,
-            xanchor="left",
-            xshift=8,
-            font=dict(family="DM Sans", size=12, color=color),
-            xref="x",
-            yref="y",
-        )
-
-    fig.update_layout(
-        barmode="stack",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="left",
-            x=0,
-            font=dict(family="DM Sans", size=12, color="#2B3674"),
-            bgcolor="rgba(0,0,0,0)",
-            traceorder="normal",
-        ),
-        margin=dict(l=10, r=60, t=30, b=10),
-        height=computed_height,
-        bargap=0.3,
-        xaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            showticklabels=False,
-            range=[0, max(totals) * 1.12] if totals else [0, 1],
-        ),
-        yaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(family="DM Sans", size=13, color="#2B3674", weight=600),
-            autorange="reversed",
-        ),
-        hoverlabel=dict(
-            bgcolor="rgba(255,255,255,0.95)",
-            bordercolor="rgba(67,24,255,0.2)",
-            font=dict(family="DM Sans", size=12, color="#2B3674"),
-        ),
-        font=dict(family="DM Sans", color="#A3AED0"),
-    )
-
-    try:
-        fig.update_traces(marker_cornerradius=6)
-    except Exception:
-        pass
-
     return fig
 
 
