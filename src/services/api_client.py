@@ -724,14 +724,18 @@ def _build_optional_params(base: dict[str, str], **kwargs: Optional[Any]) -> dic
     return base
 
 
-def get_dc_network_filters(dc_code: str, tr: Optional[dict]) -> dict:
+def get_dc_network_filters(
+    dc_code: str,
+    tr: Optional[dict],
+    interface_scope: Optional[str] = None,
+) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
 
-        return _mock_client.get_dc_network_filters(dc_code, tr)
+        return _mock_client.get_dc_network_filters(dc_code, tr, interface_scope)
     try:
         enc = quote(dc_code, safe="")
-        params = _build_time_params(tr)
+        params = _build_optional_params(_build_time_params(tr), interface_scope=interface_scope)
         data = _get_json(_client_dc, f"/api/v1/datacenters/{enc}/network/filters", params=params)
         return data if isinstance(data, dict) else {}
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
@@ -744,12 +748,13 @@ def get_dc_network_port_summary(
     manufacturer: Optional[str] = None,
     device_role: Optional[str] = None,
     device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
 ) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
 
         return _mock_client.get_dc_network_port_summary(
-            dc_code, tr, manufacturer, device_role, device_name
+            dc_code, tr, manufacturer, device_role, device_name, interface_scope
         )
     try:
         enc = quote(dc_code, safe="")
@@ -758,6 +763,7 @@ def get_dc_network_port_summary(
             manufacturer=manufacturer,
             device_role=device_role,
             device_name=device_name,
+            interface_scope=interface_scope,
         )
         data = _get_json(
             _client_dc,
@@ -776,12 +782,13 @@ def get_dc_network_95th_percentile(
     manufacturer: Optional[str] = None,
     device_role: Optional[str] = None,
     device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
 ) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
 
         return _mock_client.get_dc_network_95th_percentile(
-            dc_code, tr, top_n, manufacturer, device_role, device_name
+            dc_code, tr, top_n, manufacturer, device_role, device_name, interface_scope
         )
     try:
         enc = quote(dc_code, safe="")
@@ -791,6 +798,7 @@ def get_dc_network_95th_percentile(
             manufacturer=manufacturer,
             device_role=device_role,
             device_name=device_name,
+            interface_scope=interface_scope,
         )
         data = _get_json(
             _client_dc,
@@ -811,6 +819,7 @@ def get_dc_network_interface_table(
     manufacturer: Optional[str] = None,
     device_role: Optional[str] = None,
     device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
 ) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
@@ -824,6 +833,7 @@ def get_dc_network_interface_table(
             manufacturer,
             device_role,
             device_name,
+            interface_scope,
         )
     try:
         enc = quote(dc_code, safe="")
@@ -835,6 +845,7 @@ def get_dc_network_interface_table(
             manufacturer=manufacturer,
             device_role=device_role,
             device_name=device_name,
+            interface_scope=interface_scope,
         )
         data = _get_json(
             _client_dc,

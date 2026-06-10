@@ -120,6 +120,7 @@ def build_default_permission_roots() -> list[PermissionNode]:
                         children=[
                             _n("sub:dc_view:storage:intel", "Intel Storage", "sub_section"),
                             _n("sub:dc_view:storage:ibm", "IBM Storage", "sub_section"),
+                            _n("sub:dc_view:storage:san", "SAN Switch", "sub_section"),
                             _n("sub:dc_view:storage:s3", "Object Storage S3", "sub_section"),
                         ],
                     ),
@@ -142,8 +143,11 @@ def build_default_permission_roots() -> list[PermissionNode]:
                         "section",
                         sort_order=60,
                         children=[
-                            _n("sub:dc_view:net:dashboard", "Network Dashboard", "sub_section"),
-                            _n("sub:dc_view:net:san", "SAN", "sub_section"),
+                            _n("sub:dc_view:net:overview", "Network Overview", "sub_section"),
+                            _n("sub:dc_view:net:switch", "Switch Roles", "sub_section"),
+                            _n("sub:dc_view:net:router_uplink", "Router Uplinks", "sub_section"),
+                            _n("sub:dc_view:net:firewall", "Firewall Devices", "sub_section"),
+                            _n("sub:dc_view:net:load_balancer", "Load Balancer", "sub_section"),
                         ],
                     ),
                     _n("sec:dc_view:availability", "Availability", "section", sort_order=70),
