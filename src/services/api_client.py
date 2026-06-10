@@ -857,6 +857,47 @@ def get_dc_network_interface_table(
         return {}
 
 
+def get_dc_network_interface_export(
+    dc_code: str,
+    tr: Optional[dict],
+    search: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    device_role: Optional[str] = None,
+    device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
+) -> dict:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_dc_network_interface_export(
+            dc_code,
+            tr,
+            search,
+            manufacturer,
+            device_role,
+            device_name,
+            interface_scope,
+        )
+    try:
+        enc = quote(dc_code, safe="")
+        params = _build_optional_params(
+            _build_time_params(tr),
+            search=search or "",
+            manufacturer=manufacturer,
+            device_role=device_role,
+            device_name=device_name,
+            interface_scope=interface_scope,
+        )
+        data = _get_json(
+            _client_dc,
+            f"/api/v1/datacenters/{enc}/network/interface-export",
+            params=params,
+        )
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
 def get_dc_zabbix_storage_capacity(dc_code: str, tr: Optional[dict], host: Optional[str] = None) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client

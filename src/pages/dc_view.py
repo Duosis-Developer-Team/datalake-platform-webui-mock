@@ -2,8 +2,9 @@ from __future__ import annotations
 # DC Detail view - Capacity Planning
 # Tab hierarchy: Summary | Virtualization (Classic / Hyperconverged / Power) | Backup | Physical Inventory
 import json
+import time
 import dash
-from dash import html, dcc, dash_table, callback, Input, Output, State
+from dash import html, dcc, dash_table, callback, Input, Output, State, MATCH
 import dash_mantine_components as dmc
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
@@ -15,9 +16,15 @@ from src.utils.format_units import (
     smart_storage,
     smart_memory,
     smart_cpu,
+    format_power_capacity_count,
     pct_float,
+    alloc_pct_float,
     title_case,
     parse_storage_string,
+)
+from src.utils.ibm_storage_capacity import (
+    aggregate_ibm_storage_capacities,
+    compute_system_capacities_gb,
 )
 from src.components.charts import (
     create_usage_donut_chart,
@@ -36,6 +43,8 @@ from src.components.backup_panel import (
     build_zerto_panel,
     build_veeam_panel,
 )
+# noqa: F401 — import for side effect (registers backup-jobs callbacks)
+from src.components import backup_jobs_section  # noqa: F401
 from src.services import sla_service
 from src.utils.dc_display import format_dc_display_name
 from src.components.dc_availability_panel import build_dc_availability_panel
@@ -47,7 +56,6 @@ from src.utils.export_helpers import (
     dash_send_excel_workbook,
     dash_send_csv_bytes,
 )
-
 
 # ---------------------------------------------------------------------------
 # KPI Icon Standard — one icon per concept
@@ -262,46 +270,131 @@ def _has_compute_data(d: dict | None) -> bool:
 
 
 def _has_power_data(d: dict | None) -> bool:
-    """Return True if any meaningful IBM Power metric exists for a section."""
+    """Return True if any meaningful IBM Power compute or storage metric exists."""
     if not d:
         return False
-    keys = ("hosts", "lpar_count", "cpu_used", "memory_total")
+    keys = (
+        "hosts",
+        "lpar_count",
+        "cpu_used",
+        "memory_total",
+        "vios",
+        "storage_cap_tb",
+        "storage_used_tb",
+    )
     return any(d.get(k) not in (None, 0, 0.0, "") for k in keys)
 
 
-def _kpi(title: str, value, icon: str, color: str = "indigo", is_text: bool = False, stagger: int = 1):
+def _fmt_tl_short(value: float | int | None) -> tuple[str, str]:
+    """Compress a TL amount into a human label and return (short, full) tuple.
+
+    The short variant is suitable for KPI cards (e.g. "1.55 Trilyon TL") while
+    the full variant carries the exact comma-grouped number for the tooltip.
+    """
+    try:
+        v = float(value or 0)
+    except (TypeError, ValueError):
+        v = 0.0
+    full = f"{v:,.0f} TL"
+    abs_v = abs(v)
+    if abs_v >= 1e12:
+        return f"{v/1e12:.2f} Trilyon TL", full
+    if abs_v >= 1e9:
+        return f"{v/1e9:.2f} Milyar TL", full
+    if abs_v >= 1e6:
+        return f"{v/1e6:.2f} Milyon TL", full
+    if abs_v >= 1e3:
+        return f"{v/1e3:.1f} Bin TL", full
+    return full, full
+
+
+def _kpi_with_tooltip(
+    title: str,
+    short_value: str,
+    tooltip_full: str,
+    icon: str,
+    color: str = "indigo",
+    stagger: int = 1,
+):
+    """KPI card with a small info icon tooltip — does NOT wrap the card in Tooltip."""
+    return _kpi(title, short_value, icon, color=color, is_text=True, stagger=stagger, tooltip=tooltip_full)
+
+
+def _kpi(
+    title: str,
+    value,
+    icon: str,
+    color: str = "indigo",
+    is_text: bool = False,
+    stagger: int = 1,
+    tooltip: str | None = None,
+    opacity: float | None = None,
+    background: str | None = None,
+):
     """Standard KPI card used across all tabs."""
+    label_children: list = [
+        html.Span(
+            title,
+            style={
+                "color": "#A3AED0",
+                "fontSize": "0.75rem",
+                "fontWeight": 500,
+                "letterSpacing": "0.02em",
+                "textTransform": "uppercase",
+                "display": "-webkit-box",
+                "WebkitLineClamp": 2,
+                "WebkitBoxOrient": "vertical",
+                "overflow": "hidden",
+                "lineHeight": "1.3",
+            },
+        ),
+    ]
+    if tooltip:
+        label_children.append(
+            dmc.Tooltip(
+                label=tooltip,
+                position="top",
+                withArrow=True,
+                multiline=True,
+                w=260,
+                children=DashIconify(
+                    icon="solar:info-circle-bold-duotone",
+                    width=12,
+                    style={"color": "#A3AED0", "marginLeft": "3px", "cursor": "pointer", "flexShrink": 0},
+                ),
+            )
+        )
+    card_style: dict = {
+        "padding": "20px",
+        "display": "flex",
+        "alignItems": "center",
+        "justifyContent": "space-between",
+    }
+    if opacity is not None:
+        card_style["opacity"] = opacity
+    if background:
+        card_style["background"] = background
+
     return html.Div(
         className=f"nexus-card dc-kpi-card dc-stagger-{stagger}",
-        style={
-            "padding": "20px",
-            "display": "flex",
-            "alignItems": "center",
-            "justifyContent": "space-between",
-        },
+        style=card_style,
         children=[
-            html.Div([
-                html.Span(
-                    title,
-                    style={
-                        "color": "#A3AED0",
-                        "fontSize": "0.82rem",
-                        "fontWeight": 500,
-                        "letterSpacing": "0.02em",
-                        "textTransform": "uppercase",
-                    },
-                ),
-                html.H3(
-                    str(value),
-                    style={
-                        "color": "#2B3674",
-                        "fontSize": "1.1rem" if is_text else "1.6rem",
-                        "fontWeight": 900,
-                        "margin": "6px 0 0 0",
-                        "letterSpacing": "-0.02em",
-                    },
-                ),
-            ]),
+            html.Div(
+                style={"minWidth": 0, "flex": 1},
+                children=[
+                    html.Div(style={"display": "flex", "alignItems": "center"}, children=label_children),
+                    html.H3(
+                        str(value),
+                        style={
+                            "color": "#2B3674",
+                            "fontSize": "1.1rem" if is_text else "1.5rem",
+                            "fontWeight": 900,
+                            "margin": "6px 0 0 0",
+                            "letterSpacing": "-0.02em",
+                        },
+                    ),
+                ],
+            ),
             dmc.ThemeIcon(
                 size=48,
                 radius="xl",
@@ -316,17 +409,110 @@ def _kpi(title: str, value, icon: str, color: str = "indigo", is_text: bool = Fa
     )
 
 
+def _gauge_wrap(
+    fig,
+    label: str,
+    avg_label: str = "",
+    subtitle: str = "",
+    badge: str | None = None,
+    secondary_subtitle: str = "",
+):
+    """Renders gauge with an HTML label above — label never clips into the gauge arc."""
+    sub_text = subtitle if subtitle else (f"avg {avg_label}" if avg_label else "")
+    subtitle_nodes: list = []
+    if sub_text:
+        subtitle_nodes.append(
+            html.Span(sub_text, style={"fontSize": "0.68rem", "color": "#A3AED0", "display": "block"})
+        )
+    if secondary_subtitle:
+        subtitle_nodes.append(
+            html.Span(
+                secondary_subtitle,
+                className="cpu-alloc-real-hint",
+                style={"fontSize": "0.62rem", "color": "#8F9BB3", "display": "block"},
+            )
+        )
+    label_nodes = [
+        html.Span(label, style={
+            "fontSize": "0.72rem",
+            "fontWeight": 600,
+            "color": "#A3AED0",
+            "textTransform": "uppercase",
+            "letterSpacing": "0.04em",
+            "lineHeight": "1.3",
+            "whiteSpace": "normal",
+            "wordBreak": "break-word",
+        }),
+    ]
+    if badge:
+        label_nodes.append(
+            dmc.Badge(badge, color="red", size="xs", variant="light", style={"verticalAlign": "middle"})
+        )
+    return html.Div(
+        style={"textAlign": "center", "display": "flex", "flexDirection": "column", "width": "100%"},
+        children=[
+            html.Div(
+                style={"padding": "8px 4px 0", "minHeight": "32px"},
+                children=[
+                    html.Div(
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "justifyContent": "center",
+                            "flexWrap": "wrap",
+                            "gap": "4px",
+                        },
+                        children=label_nodes,
+                    ),
+                    *subtitle_nodes,
+                ],
+            ),
+            html.Div(
+                style={
+                    "width": "100%",
+                    "aspectRatio": "16 / 11",
+                    "maxWidth": "360px",
+                    "margin": "0 auto",
+                },
+                children=dcc.Graph(
+                    figure=fig,
+                    config={"displayModeBar": False, "responsive": True},
+                    style={"height": "100%", "width": "100%"},
+                ),
+            ),
+        ],
+    )
+
+
+def _cpu_allocation_gauge_block(compute: dict, cpu_cap: float):
+    """Physical CPU allocation gauge with overalloc badge."""
+    real = float(compute.get("cpu_alloc_ghz_vm", 0) or 0)
+    real_pct = alloc_pct_float(real, cpu_cap)
+    over_real = bool(compute.get("cpu_overallocated_real")) or (cpu_cap > 0 and real > cpu_cap)
+    primary_sub = (
+        f"{smart_cpu(real)} / {smart_cpu(cpu_cap)}"
+        + (f" ({real_pct:.1f}%)" if real_pct > 100 else "")
+        if cpu_cap > 0 else ""
+    )
+    return _gauge_wrap(
+        create_premium_gauge_chart(real_pct, "", color="#4318FF", allow_over_100=True),
+        "CPU Allocation",
+        subtitle=primary_sub,
+        badge="Overallocated" if over_real else None,
+    )
+
+
 def _chart_card(graph_component):
     return html.Div(
         className="nexus-card dc-chart-card",
         style={
             "padding": "16px",
-            "height": "250px",
+            "height": "300px",
             "display": "flex",
             "flexDirection": "column",
             "alignItems": "center",
             "justifyContent": "center",
-            "overflow": "hidden",
+            "overflow": "visible",
         },
         children=graph_component,
     )
@@ -392,7 +578,180 @@ def _section_title(title: str, subtitle: str | None = None):
     )
 
 
-def _capacity_metric_row(label: str, cap_val, used_val, pct: float, unit_fn=None):
+def _format_tl(value: float) -> str:
+    """Format a TL amount with thousands separators and short suffix for large numbers."""
+    if value <= 0:
+        return "—"
+    if value >= 1e9:
+        return f"{value/1e9:,.2f}B TL"
+    if value >= 1e6:
+        return f"{value/1e6:,.2f}M TL"
+    if value >= 1e3:
+        return f"{value/1e3:,.1f}K TL"
+    return f"{value:,.0f} TL"
+
+
+def _capacity_pct_badge_color(pct: float) -> str:
+    return "indigo" if pct < 60 else "yellow" if pct < 80 else "red"
+
+
+def _capacity_pct_bar_color(pct: float) -> str:
+    return "#05CD99" if pct < 60 else "#FFB547" if pct < 80 else "#EE5D50"
+
+
+def _capacity_value_cell(value_str: str, pct: float):
+    """Value with colored percentage badge in parentheses."""
+    return html.Div(
+        style={"display": "flex", "alignItems": "center", "gap": "6px", "flexWrap": "wrap"},
+        children=[
+            html.Span(value_str, style={"color": "#4318FF", "fontSize": "0.8rem", "fontWeight": 600}),
+            dmc.Badge(
+                f"({pct:.1f}%)",
+                color=_capacity_pct_badge_color(pct),
+                variant="light",
+                size="sm",
+            ),
+        ],
+    )
+
+
+def _capacity_alloc_bar(pct: float):
+    """Horizontal allocation bar; full width when pct exceeds 100%."""
+    bar_pct = min(float(pct), 100.0)
+    bar_color = _capacity_pct_bar_color(pct)
+    if pct > 100:
+        bar_color = "#EE5D50"
+    return html.Div(
+        style={
+            "height": "6px",
+            "borderRadius": "3px",
+            "background": "#EEF2FF",
+            "overflow": "hidden",
+        },
+        children=html.Div(
+            style={
+                "width": f"{bar_pct:.1f}%",
+                "height": "100%",
+                "borderRadius": "3px",
+                "background": f"linear-gradient(90deg, #4318FF 0%, {bar_color} 100%)",
+                "transition": "width 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)",
+            },
+        ),
+    )
+
+
+def _capacity_resource_table(rows: list[dict]):
+    """One row per resource: total, allocation, sales (CPU only), max util, bar."""
+    header_style = {
+        "color": "#A3AED0",
+        "fontSize": "0.72rem",
+        "fontWeight": 700,
+        "textTransform": "uppercase",
+        "letterSpacing": "0.04em",
+    }
+    cell_style = {"padding": "10px 8px", "verticalAlign": "middle"}
+    label_style = {"color": "#2B3674", "fontWeight": 700, "fontSize": "0.85rem"}
+
+    def _metric_cell(pair: tuple[str, float] | None):
+        if pair is None:
+            return html.Td("—", style={**cell_style, "color": "#A3AED0"})
+        value_str, pct = pair
+        return html.Td(_capacity_value_cell(value_str, pct), style=cell_style)
+
+    body_rows = []
+    for row in rows:
+        body_rows.append(
+                    html.Tr(
+                [
+                    html.Td(row["label"], style={**cell_style, **label_style}),
+                    html.Td(
+                        row["total_str"],
+                        style={**cell_style, "color": "#2B3674", "fontSize": "0.8rem", "fontWeight": 600},
+                    ),
+                    _metric_cell(row.get("allocation")),
+                    _metric_cell(row.get("max_util")),
+                    html.Td(_capacity_alloc_bar(row["bar_pct"]), style=cell_style),
+                ]
+            )
+        )
+
+    return html.Div(
+        style={"overflowX": "auto"},
+        children=[
+            html.Table(
+                style={"width": "100%", "borderCollapse": "collapse"},
+                children=[
+                    html.Thead(
+                        html.Tr(
+                            [
+                                html.Th("Resource", style=header_style),
+                                html.Th("Total", style=header_style),
+                                html.Th("Physical allocation", style=header_style),
+                                html.Th("Max utilization", style=header_style),
+                                html.Th("", style=header_style),
+                            ]
+                        )
+                    ),
+                    html.Tbody(body_rows),
+                ],
+            )
+        ],
+    )
+
+
+def _build_compute_capacity_rows(
+    *,
+    cpu_cap: float,
+    cpu_alloc_ghz: float,
+    cpu_alloc_pct: float,
+    cpu_pct_max: float,
+    cpu_pct: float,
+    mem_cap: float,
+    mem_alloc_gb: float,
+    mem_alloc_pct: float,
+    mem_pct_max: float,
+    mem_pct: float,
+    stor_cap_gb: float,
+    stor_provisioned_gb: float,
+    stor_used_gb: float,
+    stor_alloc_vm_pct: float,
+    stor_pct: float,
+) -> list[dict]:
+    """Build three capacity planning rows for Classic/Hyperconv compute tabs."""
+    cpu_max_pct = cpu_pct_max or cpu_pct
+    mem_max_pct = mem_pct_max or mem_pct
+    return [
+        {
+            "label": "CPU",
+            "total_str": smart_cpu(cpu_cap),
+            "allocation": (smart_cpu(cpu_alloc_ghz), cpu_alloc_pct),
+            "max_util": (
+                smart_cpu(cpu_cap * cpu_max_pct / 100.0 if cpu_cap else 0),
+                cpu_max_pct,
+            ),
+            "bar_pct": cpu_alloc_pct,
+        },
+        {
+            "label": "Memory",
+            "total_str": smart_memory(mem_cap),
+            "allocation": (smart_memory(mem_alloc_gb), mem_alloc_pct),
+            "max_util": (
+                smart_memory(mem_cap * mem_max_pct / 100.0 if mem_cap else 0),
+                mem_max_pct,
+            ),
+            "bar_pct": mem_alloc_pct,
+        },
+        {
+            "label": "Storage",
+            "total_str": smart_storage(stor_cap_gb),
+            "allocation": (smart_storage(stor_provisioned_gb), stor_alloc_vm_pct),
+            "max_util": (smart_storage(stor_used_gb), stor_pct),
+            "bar_pct": stor_alloc_vm_pct,
+        },
+    ]
+
+
+def _capacity_metric_row(label: str, cap_val, used_val, pct: float, unit_fn=None, potential_tl: float = 0.0):
     """Renders a capacity / allocated / utilisation trio inside a card row."""
     cap_str  = unit_fn(cap_val)  if unit_fn else str(cap_val)
     used_str = unit_fn(used_val) if unit_fn else str(used_val)
@@ -400,22 +759,26 @@ def _capacity_metric_row(label: str, cap_val, used_val, pct: float, unit_fn=None
     return html.Div(
         className="dc-capacity-row",
         style={
-            "display": "flex",
-            "justifyContent": "space-between",
+            "display": "grid",
+            "gridTemplateColumns": "140px 1fr 1fr 1fr 70px 90px",
             "alignItems": "center",
+            "gap": "12px",
+            "padding": "8px 0",
             "borderBottom": "1px solid #F4F7FE",
         },
         children=[
             html.Span(
                 label,
-                style={
-                    "color": "#2B3674",
-                    "fontWeight": 700,
-                    "fontSize": "0.85rem",
-                    "minWidth": "120px",
-                },
+                style={"color": "#2B3674", "fontWeight": 700, "fontSize": "0.85rem"},
             ),
-            html.Span(f"Capacity: {cap_str}", style={"color": "#A3AED0", "fontSize": "0.8rem"}),
+            html.Span(
+                f"Capacity: {cap_str}",
+                style={"color": "#A3AED0", "fontSize": "0.8rem"},
+            ),
+            html.Span(
+                f"Potential: {_format_tl(potential_tl)}" if potential_tl > 0 else "",
+                style={"color": "#05CD99", "fontSize": "0.8rem", "fontWeight": 600},
+            ),
             html.Span(
                 f"Allocated: {used_str}",
                 style={"color": "#4318FF", "fontSize": "0.8rem", "fontWeight": 600},
@@ -425,16 +788,14 @@ def _capacity_metric_row(label: str, cap_val, used_val, pct: float, unit_fn=None
                 color="indigo" if pct < 60 else "yellow" if pct < 80 else "red",
                 variant="light",
                 size="sm",
-                style={"minWidth": "60px", "textAlign": "center"},
+                style={"textAlign": "center"},
             ),
             html.Div(
                 style={
-                    "width": "80px",
                     "height": "6px",
                     "borderRadius": "3px",
                     "background": "#EEF2FF",
                     "overflow": "hidden",
-                    "marginLeft": "8px",
                 },
                 children=html.Div(
                     style={
@@ -454,18 +815,20 @@ def _capacity_metric_row(label: str, cap_val, used_val, pct: float, unit_fn=None
 # Tab content builders
 # ---------------------------------------------------------------------------
 
-def _build_compute_tab(compute: dict, title: str, color: str = "indigo", is_power: bool = False):
+def _build_compute_tab(compute: dict, title: str, color: str = "indigo", is_power: bool = False, slug: str | None = None):
     """Generic compute type tab panel content (Classic or Hyperconverged)."""
+    if not slug:
+        slug = title.lower().replace(" ", "-").replace("/", "-")
     hosts    = compute.get("hosts", 0)
     vms      = compute.get("vms", 0)
     cpu_cap  = compute.get("cpu_cap", 0.0)
     cpu_used = compute.get("cpu_used", 0.0)
-    cpu_pct  = compute.get("cpu_pct", pct_float(cpu_used, cpu_cap))
+    cpu_pct  = float(compute.get("cpu_util_pct") or compute.get("cpu_pct") or pct_float(cpu_used, cpu_cap))
     mem_cap  = compute.get("mem_cap", 0.0)
     mem_used = compute.get("mem_used", 0.0)
-    mem_pct  = compute.get("mem_pct", pct_float(mem_used, mem_cap))
-    cpu_pct_max = float(compute.get("cpu_pct_max") or 0)
-    mem_pct_max = float(compute.get("mem_pct_max") or 0)
+    mem_pct  = float(compute.get("mem_util_pct") or compute.get("mem_pct") or pct_float(mem_used, mem_cap))
+    cpu_pct_max = float(compute.get("cpu_util_pct_max") or compute.get("cpu_pct_max") or 0)
+    mem_pct_max = float(compute.get("mem_util_pct_max") or compute.get("mem_pct_max") or 0)
     stor_cap  = compute.get("stor_cap", 0.0)
     stor_used = compute.get("stor_used", 0.0)
     stor_pct  = pct_float(stor_used, stor_cap)
@@ -474,52 +837,130 @@ def _build_compute_tab(compute: dict, title: str, color: str = "indigo", is_powe
     stor_cap_gb  = stor_cap  * 1024
     stor_used_gb = stor_used * 1024
 
+    cpu_alloc_ghz = float(compute.get("cpu_alloc_ghz_vm", 0) or 0)
+    mem_alloc_gb  = float(compute.get("mem_alloc_gb_vm", 0) or 0)
+    cpu_alloc_pct = alloc_pct_float(cpu_alloc_ghz, cpu_cap)
+    mem_alloc_pct = alloc_pct_float(mem_alloc_gb, mem_cap)
+
+    # VM-level storage breakdown.
+    stor_provisioned_gb = float(compute.get("stor_provisioned_gb", 0) or 0)
+    stor_actual_used_gb = float(compute.get("stor_actual_used_gb", 0) or 0)
+    stor_util_pct  = stor_pct
+    stor_alloc_vm_pct = alloc_pct_float(stor_provisioned_gb, stor_cap_gb) if stor_cap_gb > 0 else 0.0
+
+    capacity_rows = _build_compute_capacity_rows(
+        cpu_cap=cpu_cap,
+        cpu_alloc_ghz=cpu_alloc_ghz,
+        cpu_alloc_pct=cpu_alloc_pct,
+        cpu_pct_max=cpu_pct_max,
+        cpu_pct=cpu_pct,
+        mem_cap=mem_cap,
+        mem_alloc_gb=mem_alloc_gb,
+        mem_alloc_pct=mem_alloc_pct,
+        mem_pct_max=mem_pct_max,
+        mem_pct=mem_pct,
+        stor_cap_gb=stor_cap_gb,
+        stor_provisioned_gb=stor_provisioned_gb,
+        stor_used_gb=stor_used_gb,
+        stor_alloc_vm_pct=stor_alloc_vm_pct,
+        stor_pct=stor_pct,
+    )
+
+    util_grid = _dynamic_chart_grid([
+        (_has_value(cpu_cap), _gauge_wrap(
+            create_premium_gauge_chart(cpu_pct_max or cpu_pct, "", color="#4318FF"),
+            "CPU Usage (Max)",
+            subtitle=f"avg {cpu_pct:.1f}%",
+        )),
+        (_has_value(mem_cap), _gauge_wrap(
+            create_premium_gauge_chart(mem_pct_max or mem_pct, "", color="#05CD99"),
+            "RAM Usage (Max)",
+            subtitle=f"avg {mem_pct:.1f}%",
+        )),
+        (_has_value(stor_cap), _gauge_wrap(
+            create_premium_gauge_chart(min(stor_util_pct, 100), "", color="#FFB547"),
+            "Storage Usage",
+            subtitle=(
+                f"{smart_storage(stor_used_gb)} / {smart_storage(stor_cap_gb)} used"
+                if stor_cap_gb > 0 else ""
+            ),
+        )),
+    ])
+    alloc_grid = _dynamic_chart_grid([
+        (_has_value(cpu_cap), _cpu_allocation_gauge_block(compute, cpu_cap)),
+        (_has_value(mem_cap), _gauge_wrap(
+            create_premium_gauge_chart(mem_alloc_pct, "", color="#05CD99", allow_over_100=True),
+            "RAM Allocation",
+            subtitle=(
+                f"{smart_memory(mem_alloc_gb)} / {smart_memory(mem_cap)}"
+                + (f" ({mem_alloc_pct:.0f}%)" if mem_alloc_pct > 100 else "")
+                if mem_cap > 0 else ""
+            ),
+        )),
+        (_has_value(stor_cap), _gauge_wrap(
+            create_premium_gauge_chart(stor_alloc_vm_pct, "", color="#FFB547", allow_over_100=True),
+            "Storage Allocation",
+            subtitle=(
+                f"{smart_storage(stor_provisioned_gb)} / {smart_storage(stor_cap_gb)} provisioned"
+                if stor_provisioned_gb > 0 and stor_cap_gb > 0
+                else (f"{smart_storage(stor_used_gb)} / {smart_storage(stor_cap_gb)}" if stor_cap_gb > 0 else "")
+            ),
+        )),
+    ])
+
+    alloc_panel_children: list = []
+    if alloc_grid is not None:
+        alloc_panel_children.append(alloc_grid)
+
+    gauges_section: list = []
+    if util_grid is not None or alloc_panel_children:
+        gauges_section = [
+            dmc.Group(
+                justify="flex-end",
+                style={"marginTop": "8px"},
+                children=[
+                    dmc.SegmentedControl(
+                        id={"type": "compute-gauge-mode", "slug": slug},
+                        value="utilization",
+                        data=[
+                            {"label": "Utilization", "value": "utilization"},
+                            {"label": "Allocation", "value": "allocation"},
+                        ],
+                        size="xs",
+                        color="indigo",
+                    ),
+                ],
+            ),
+            html.Div(
+                id={"type": "compute-gauge-util", "slug": slug},
+                children=util_grid,
+            ),
+            html.Div(
+                id={"type": "compute-gauge-alloc", "slug": slug},
+                children=alloc_panel_children or None,
+                style={"display": "none"},
+            ),
+        ]
+
     return dmc.Stack(
         gap="lg",
         children=[
             # KPI row
-            dmc.SimpleGrid(cols=4, spacing="lg", children=[
+            dmc.SimpleGrid(cols={"base": 2, "md": 4}, spacing="md", children=[
                 _kpi("Total Hosts", f"{hosts:,}", _DC_ICONS["hosts"], color=color),
                 _kpi("Total VMs / LPARs", f"{vms:,}", _DC_ICONS["vms"], color=color),
                 _kpi("CPU Capacity",  smart_cpu(cpu_cap),  _DC_ICONS["cpu"],   color=color, is_text=True),
                 _kpi("RAM Capacity",  smart_memory(mem_cap), _DC_ICONS["ram"], color=color, is_text=True),
             ]),
-            # Donut charts — only shown when capacity data exists (None → DMC ignores)
-            _dynamic_chart_grid([
-                (_has_value(cpu_cap), dcc.Graph(
-                    figure=(
-                        create_premium_gauge_with_avg(cpu_pct, cpu_pct_max, "CPU Usage (peak)", color="#4318FF")
-                        if cpu_pct_max > 0
-                        else create_premium_gauge_chart(cpu_pct, "CPU Usage", color="#4318FF")
-                    ),
-                    config={"displayModeBar": False},
-                    style={"height": "100%", "width": "100%"},
-                )),
-                (_has_value(mem_cap), dcc.Graph(
-                    figure=(
-                        create_premium_gauge_with_avg(mem_pct, mem_pct_max, "RAM Usage (peak)", color="#05CD99")
-                        if mem_pct_max > 0
-                        else create_premium_gauge_chart(mem_pct, "RAM Usage", color="#05CD99")
-                    ),
-                    config={"displayModeBar": False},
-                    style={"height": "100%", "width": "100%"},
-                )),
-                (_has_value(stor_cap), dcc.Graph(
-                    figure=create_premium_gauge_chart(stor_pct, "Storage Usage", color="#FFB547"),
-                    config={"displayModeBar": False},
-                    style={"height": "100%", "width": "100%"},
-                )),
-            ]),
+            *gauges_section,
             # Capacity details card
             html.Div(
                 className="nexus-card",
                 style={"padding": "20px"},
                 children=[
-                    _section_title("Capacity Planning", "Host-level resources vs. allocated to workloads"),
+                    _section_title("Capacity Planning", "Physical capacity vs. utilization and VM allocation"),
                     html.Div(style={"marginTop": "12px"}, children=[
-                        _capacity_metric_row("CPU", cpu_cap, cpu_used, cpu_pct, smart_cpu),
-                        _capacity_metric_row("Memory", mem_cap, mem_used, mem_pct, smart_memory),
-                        _capacity_metric_row("Storage", stor_cap_gb, stor_used_gb, stor_pct, smart_storage),
+                        _capacity_resource_table(capacity_rows),
                     ]),
                 ],
             ),
@@ -542,6 +983,19 @@ def _build_power_tab(
     mem_assigned = power.get("memory_assigned", 0.0)
     cpu_used     = power.get("cpu_used", 0.0)
     cpu_assigned = power.get("cpu_assigned", 1.0) or 1.0
+    cpu_total_pu = power.get("cpu_total_procunits", 0.0) or 0.0
+    cpu_total_cores = power.get("cpu_total_cores", 0.0) or 0.0
+    cpu_avail_pu = power.get("cpu_available_procunits", 0.0) or 0.0
+    cpu_avail_cores = power.get("cpu_available_cores", 0.0) or 0.0
+    cpu_allocated_pu = max(cpu_total_pu - cpu_avail_pu, 0.0)
+    cpu_allocated_cores = max(cpu_total_cores - cpu_avail_cores, 0.0)
+
+    # Potential Sellable revenue — Power: 1 core = 3.3 GHz eşdeğeri,
+    # CRM CPU fiyatı (SAP Power HANA CPU) 1 GHz/vCPU üzerinden tutulduğu için
+    # cores × 3.3 × cpu_unit_price formülü uygulanır.
+    power_unit_prices = power.get("unit_prices", {}) or {}
+    power_multiplier  = float(power.get("sellable_multiplier", 3.3) or 3.3)
+    cpu_potential_tl  = cpu_total_cores * power_multiplier * float(power_unit_prices.get("cpu_vcpu", 0) or 0)
 
     storage_capacity = storage_capacity or {}
     storage_performance = storage_performance or {}
@@ -568,22 +1022,24 @@ def _build_power_tab(
     return dmc.Stack(
         gap="lg",
         children=[
-            dmc.SimpleGrid(cols=4, spacing="lg", children=[
+            dmc.SimpleGrid(cols={"base": 2, "md": 4}, spacing="md", children=[
                 _kpi("IBM Hosts",   f"{hosts:,}", _DC_ICONS["ibm_hosts"],   color="grape"),
                 _kpi("VIOS",        f"{vios:,}",  _DC_ICONS["vios"],        color="grape"),
                 _kpi("LPARs",       f"{lpars:,}", _DC_ICONS["lpars"],       color="grape"),
                 _kpi("Last Updated", "Live",       _DC_ICONS["last_updated"], color="grape", is_text=True),
             ]),
             _dynamic_chart_grid([
-                (_has_value(mem_total), dcc.Graph(
-                    figure=create_gauge_chart(mem_assigned, mem_total or 1, "Memory Assigned", color="#05CD99"),
-                    config={"displayModeBar": False},
-                    style={"height": "100%", "width": "100%"},
+                (_has_value(mem_total), _gauge_wrap(
+                    create_gauge_chart(mem_assigned, mem_total or 1, "", color="#05CD99", height=220),
+                    "Memory Assigned",
                 )),
-                (_has_value(cpu_assigned), dcc.Graph(
-                    figure=create_gauge_chart(cpu_used, cpu_assigned, "CPU Used", color="#4318FF"),
-                    config={"displayModeBar": False},
-                    style={"height": "100%", "width": "100%"},
+                (_has_value(cpu_assigned), _gauge_wrap(
+                    create_gauge_chart(cpu_used, cpu_assigned, "", color="#4318FF", height=220),
+                    "CPU Used",
+                )),
+                (_has_value(cpu_total_pu), _gauge_wrap(
+                    create_gauge_chart(cpu_allocated_pu, cpu_total_pu or 1, "", color="#FF6B6B", height=220),
+                    "CPU Assigned",
                 )),
             ]),
             html.Div(
@@ -592,6 +1048,28 @@ def _build_power_tab(
                 children=[
                     _section_title("Capacity Planning", "IBM Power resource allocation"),
                     html.Div(style={"marginTop": "12px"}, children=[
+                        _capacity_metric_row(
+                            "CPU (Proc Units)",
+                            cpu_total_pu,
+                            cpu_allocated_pu,
+                            pct_float(cpu_allocated_pu, cpu_total_pu),
+                            format_power_capacity_count,
+                        ),
+                        _capacity_metric_row(
+                            "CPU Cores",
+                            cpu_total_cores,
+                            cpu_allocated_cores,
+                            pct_float(cpu_allocated_cores, cpu_total_cores),
+                            format_power_capacity_count,
+                        ),
+                        _capacity_metric_row(
+                            "CPU (GHz)",
+                            cpu_total_cores * power_multiplier,
+                            cpu_allocated_cores * power_multiplier,
+                            pct_float(cpu_allocated_cores, cpu_total_cores),
+                            smart_cpu,
+                            potential_tl=cpu_potential_tl,
+                        ),
                         _capacity_metric_row(
                             "Memory",
                             mem_total, mem_assigned,
@@ -610,10 +1088,9 @@ def _build_power_tab(
                         style={"marginTop": "12px"},
                         children=(
                             _chart_card(
-                                dcc.Graph(
-                                    figure=create_gauge_chart(used_gb, total_gb or 1, "Storage Capacity", color="#FFB547"),
-                                    config={"displayModeBar": False},
-                                    style={"height": "100%", "width": "100%"},
+                                _gauge_wrap(
+                                    create_gauge_chart(used_gb, total_gb or 1, "", color="#FFB547", height=220),
+                                    "Storage Capacity",
                                 )
                             )
                             if storage_systems
@@ -954,11 +1431,7 @@ def _build_san_subtab(port_usage: dict, health_alerts: list[dict], traffic_trend
                                 style={"width": "100%"},
                                 children=[
                                     _chart_card(
-                                        dcc.Graph(
-                                            figure=create_premium_gauge_chart(licensed_pct, "Pod License ROI", color="#4318FF"),
-                                            config={"displayModeBar": False},
-                                            style={"height": "100%", "width": "100%"},
-                                        )
+                                        _gauge_wrap(create_premium_gauge_chart(licensed_pct, "", color="#4318FF"), "Pod License ROI")
                                     ),
                                     html.P(
                                         "Coverage: Licensed ports divided by total ports.",
@@ -970,11 +1443,7 @@ def _build_san_subtab(port_usage: dict, health_alerts: list[dict], traffic_trend
                                 style={"width": "100%"},
                                 children=[
                                     _chart_card(
-                                        dcc.Graph(
-                                            figure=create_premium_gauge_chart(active_pct, "Active vs Licensed", color="#05CD99"),
-                                            config={"displayModeBar": False},
-                                            style={"height": "100%", "width": "100%"},
-                                        )
+                                        _gauge_wrap(create_premium_gauge_chart(active_pct, "", color="#05CD99"), "Active vs Licensed")
                                     ),
                                     html.P(
                                         "Utilization: Active ports divided by licensed ports (admin-enabled + operational).",
@@ -986,11 +1455,7 @@ def _build_san_subtab(port_usage: dict, health_alerts: list[dict], traffic_trend
                                 style={"width": "100%"},
                                 children=[
                                     _chart_card(
-                                        dcc.Graph(
-                                            figure=create_premium_gauge_chart(available_pct, "Port Availability", color="#FFB547"),
-                                            config={"displayModeBar": False},
-                                            style={"height": "100%", "width": "100%"},
-                                        )
+                                        _gauge_wrap(create_premium_gauge_chart(available_pct, "", color="#FFB547"), "Port Availability")
                                     ),
                                     html.P(
                                         "Availability: Active ports divided by total ports. Remaining ports are No Link/Offline or Admin Disabled.",
@@ -1055,7 +1520,286 @@ def _build_backup_subtab(name: str):
     )
 
 
-def _build_summary_tab(data: dict, tr: dict):
+def _build_crm_sales_potential_panel(dc_id: str) -> html.Div:
+    """CRM realized sales + sellable headroom KPIs (no sold-% gauges)."""
+    v2 = api.get_dc_sales_potential_v2(dc_id)
+    if not isinstance(v2, dict):
+        return html.Div()
+    summ = v2.get("dc_customer_summary") or {}
+    ytd = float(summ.get("total_billed_ytd") or 0)
+    cust = int(summ.get("customer_count") or 0)
+    rem = float(v2.get("general_remaining_pct") or 0)
+    pot = float(v2.get("potential_revenue_tl") or 0)
+
+    ytd_short, ytd_full = _fmt_tl_short(ytd)
+    pot_short, pot_full = _fmt_tl_short(pot)
+
+    return html.Div(
+        className="nexus-card",
+        style={"padding": "20px"},
+        children=[
+            _section_title(
+                "Sellable potential (CRM)",
+                "Sellable headroom on Nutanix CPU/RAM proxy — threshold-bound ceiling (ADR-0014)",
+            ),
+            dmc.SimpleGrid(
+                cols={"base": 2, "md": 4},
+                spacing="md",
+                style={"marginTop": "12px"},
+                children=[
+                    _kpi_with_tooltip("YTD Realized", ytd_short, ytd_full, "solar:money-bag-bold-duotone"),
+                    _kpi("Sellable Remaining %", f"{rem:.1f}", "solar:chart-square-bold-duotone"),
+                    _kpi_with_tooltip(
+                        "Potential Revenue",
+                        pot_short,
+                        pot_full,
+                        "solar:wallet-money-bold-duotone",
+                    ),
+                    _kpi("VM-Mapped Customers", f"{cust:,}", "solar:users-group-rounded-bold-duotone"),
+                ],
+            ),
+        ],
+    )
+
+
+def _build_sellable_inline_kpi(
+    dc_id: str | None,
+    families: list[str] | str,
+    title: str,
+    *,
+    color: str = "violet",
+    selected_clusters: list[str] | None = None,
+    container_id: str | None = None,
+) -> html.Div | None:
+    """Inline 'Sellable Potential' card for a sub-tab (Faz 6).
+
+    Aggregates ``crm-engine`` /sellable-potential/by-panel results for one or
+    more ``family`` keys (e.g. ``virt_hyperconverged`` or
+    ``backup_zerto_replication``) and renders a 4-card KPI grid: CPU sellable /
+    RAM sellable / Storage sellable / Total potential TL — all in the
+    constrained (ratio-bound) space because that's what's actually monetisable.
+
+    When ``selected_clusters`` is provided for a virt family, the crm-engine
+    reads total + allocated for that scope from datacenter-api
+    ``/compute/{kind}?clusters=...`` so this card matches the DC view
+    Capacity Planning card for the same selection. ``container_id`` lets
+    Dash callbacks target the outer wrapper Div as an Output.
+    """
+    if isinstance(families, str):
+        families = [families]
+    families = [f for f in families if f]
+
+    if not dc_id or not families:
+        if container_id:
+            return html.Div(id=container_id)
+        return None
+
+    panels: list[dict] = []
+    for fam in families:
+        try:
+            chunk = api.get_sellable_by_panel(
+                dc_code=str(dc_id),
+                family=fam,
+                clusters=selected_clusters if fam in ("virt_classic", "virt_hyperconverged") else None,
+            ) or []
+            if isinstance(chunk, list):
+                panels.extend(chunk)
+        except Exception:
+            continue
+
+    if not panels:
+        if container_id:
+            return html.Div(id=container_id)
+        return None
+
+    by_kind: dict[str, dict[str, float]] = {
+        "cpu":     {
+            "constrained": 0.0, "raw": 0.0, "tl": 0.0, "unit": "vCPU",
+            "total": 0.0, "allocated": 0.0, "threshold_pct": 80.0,
+        },
+        "ram":     {
+            "constrained": 0.0, "raw": 0.0, "tl": 0.0, "unit": "GB",
+            "total": 0.0, "allocated": 0.0, "threshold_pct": 80.0,
+        },
+        "storage": {
+            "constrained": 0.0, "raw": 0.0, "tl": 0.0, "unit": "GB",
+            "total": 0.0, "allocated": 0.0, "threshold_pct": 85.0,
+        },
+    }
+    total_tl = 0.0
+    has_data = False
+    for p in panels:
+        if not isinstance(p, dict):
+            continue
+        kind = (p.get("resource_kind") or "other").lower()
+        if kind not in by_kind:
+            total_tl += float(p.get("potential_tl") or 0.0)
+            continue
+        by_kind[kind]["constrained"] += float(p.get("sellable_constrained") or 0.0)
+        by_kind[kind]["raw"]         += float(p.get("sellable_raw") or 0.0)
+        by_kind[kind]["tl"]          += float(p.get("potential_tl") or 0.0)
+        by_kind[kind]["total"]       += float(p.get("total") or 0.0)
+        by_kind[kind]["allocated"]   += float(p.get("allocated") or 0.0)
+        thresh = p.get("threshold_pct")
+        if thresh is not None:
+            by_kind[kind]["threshold_pct"] = float(thresh)
+        unit = p.get("display_unit")
+        if unit:
+            by_kind[kind]["unit"] = unit
+        total_tl += float(p.get("potential_tl") or 0.0)
+        has_data = True
+
+    if not has_data and total_tl <= 0:
+        if container_id:
+            return html.Div(id=container_id)
+        return None
+
+    def _fmt_unit(value: float, unit: str) -> str:
+        if unit.lower() in ("vcpu", "cpu", "core", "adet"):
+            return f"{value:,.0f} {unit}"
+        return f"{value:,.0f} {unit}"
+
+    cpu = by_kind["cpu"]
+    ram = by_kind["ram"]
+    stor = by_kind["storage"]
+
+    def _kpi_with_sub(
+        label: str,
+        value: str,
+        sub_short: str,
+        sub_full: str,
+        ic: str,
+        c: str = color,
+    ) -> html.Div:
+        card = html.Div(
+            className="nexus-card dc-kpi-card dc-stagger-1",
+            style={
+                "padding": "18px",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "space-between",
+                "gap": "12px",
+                "minHeight": "140px",
+                "height": "100%",
+                "width": "100%",
+                "boxSizing": "border-box",
+            },
+            children=[
+                html.Div(
+                    style={"display": "flex", "flexDirection": "column", "minWidth": 0, "flex": "1 1 auto"},
+                    children=[
+                        html.Span(label, style={
+                            "color": "#A3AED0", "fontSize": "0.78rem", "fontWeight": 500,
+                            "letterSpacing": "0.02em", "textTransform": "uppercase",
+                        }),
+                        html.H3(value, style={
+                            "color": "#2B3674", "fontSize": "1.15rem", "fontWeight": 900,
+                            "margin": "6px 0 2px 0", "letterSpacing": "-0.02em",
+                        }),
+                        html.Span(sub_short, style={"color": "#4318FF", "fontSize": "0.78rem", "fontWeight": 700}),
+                    ],
+                ),
+                dmc.ThemeIcon(
+                    size=42, radius="xl", variant="light", color=c,
+                    children=DashIconify(icon=ic, width=22),
+                ),
+            ],
+        )
+        return html.Div(
+            style={"width": "100%", "height": "100%", "display": "flex", "flexDirection": "column"},
+            title=sub_full if sub_full and sub_full != sub_short else None,
+            children=card,
+        )
+
+    cpu_short, cpu_full = _fmt_tl_short(cpu["tl"])
+    ram_short, ram_full = _fmt_tl_short(ram["tl"])
+    stor_short, stor_full = _fmt_tl_short(stor["tl"])
+    total_short, total_full = _fmt_tl_short(total_tl)
+
+    cards = [
+        _kpi_with_sub(
+            "CPU Sellable",
+            _fmt_unit(cpu["constrained"], cpu["unit"]),
+            cpu_short,
+            cpu_full,
+            _DC_ICONS["cpu"],
+        ),
+        _kpi_with_sub(
+            "RAM Sellable",
+            _fmt_unit(ram["constrained"], ram["unit"]),
+            ram_short,
+            ram_full,
+            _DC_ICONS["ram"],
+        ),
+        _kpi_with_sub(
+            "Storage Sellable",
+            _fmt_unit(stor["constrained"], stor["unit"]),
+            stor_short,
+            stor_full,
+            _DC_ICONS["storage"],
+        ),
+        _kpi_with_sub(
+            "Total Potential",
+            total_short,
+            "× catalog price",
+            total_full or "constrained × catalog price",
+            "solar:wallet-money-bold-duotone",
+            c="grape",
+        ),
+    ]
+
+    sub_lines: list = []
+    for kind_label, k in (("CPU", cpu), ("RAM", ram), ("Storage", stor)):
+        if k["raw"] > 0 and k["constrained"] < k["raw"] - 1e-6:
+            sub_lines.append(
+                dmc.Badge(
+                    f"{kind_label} ratio-bound: {_fmt_unit(k['raw'] - k['constrained'], k['unit'])} lost",
+                    color="orange",
+                    variant="light",
+                    size="sm",
+                )
+            )
+
+    from src.utils.sellable_power_hints import power_sellable_constraint_hints
+
+    for hint in power_sellable_constraint_hints(
+        families,
+        cpu_raw=cpu["raw"],
+        cpu_constrained=cpu["constrained"],
+        ram_raw=ram["raw"],
+        ram_total=float(ram.get("total") or 0),
+        ram_allocated=float(ram.get("allocated") or 0),
+        ram_threshold_pct=float(ram.get("threshold_pct") or 80.0),
+    ):
+        color = "orange" if hint.startswith("CPU blocked") else "yellow"
+        sub_lines.append(
+            dmc.Badge(hint, color=color, variant="light", size="sm"),
+        )
+
+    div_kwargs: dict = {
+        "className": "nexus-card",
+        "style": {"padding": "20px"},
+        "children": [
+            _section_title(title, "Constrained sellable headroom (ratio-aware) and TL potential"),
+            html.Div(
+                style={
+                    "display": "grid",
+                    "gridTemplateColumns": "repeat(4, minmax(0, 1fr))",
+                    "gap": "16px",
+                    "alignItems": "stretch",
+                    "marginTop": "12px",
+                },
+                children=cards,
+            ),
+            dmc.Group(gap="xs", style={"marginTop": "10px"}, children=sub_lines) if sub_lines else None,
+        ],
+    }
+    if container_id:
+        div_kwargs["id"] = container_id
+    return html.Div(**div_kwargs)
+
+
+def _build_summary_tab(data: dict, tr: dict, dc_id: str | None = None):
     """Summary tab: combined capacity planning view."""
     classic    = data.get("classic", {})
     hyperconv  = data.get("hyperconv", {})
@@ -1110,20 +1854,14 @@ def _build_summary_tab(data: dict, tr: dict):
                     ],
                 )]
                 if (_summary_util_grid := _dynamic_chart_grid([
-                    (_has_value(total_cpu_cap), dcc.Graph(
-                        figure=create_premium_gauge_chart(cpu_pct, "CPU Usage", color="#4318FF"),
-                        config={"displayModeBar": False},
-                        style={"height": "100%", "width": "100%"},
+                    (_has_value(total_cpu_cap), _gauge_wrap(
+                        create_premium_gauge_chart(cpu_pct, "", color="#4318FF"), "CPU Usage"
                     )),
-                    (_has_value(total_mem_cap), dcc.Graph(
-                        figure=create_premium_gauge_chart(mem_pct, "RAM Usage", color="#05CD99"),
-                        config={"displayModeBar": False},
-                        style={"height": "100%", "width": "100%"},
+                    (_has_value(total_mem_cap), _gauge_wrap(
+                        create_premium_gauge_chart(mem_pct, "", color="#05CD99"), "RAM Usage"
                     )),
-                    (_has_value(total_stor_cap), dcc.Graph(
-                        figure=create_premium_gauge_chart(stor_pct, "Storage Usage", color="#FFB547"),
-                        config={"displayModeBar": False},
-                        style={"height": "100%", "width": "100%"},
+                    (_has_value(total_stor_cap), _gauge_wrap(
+                        create_premium_gauge_chart(stor_pct, "", color="#FFB547"), "Storage Usage",
                     )),
                 ])) is not None
                 else []
@@ -1537,13 +2275,68 @@ def _network_interface_table_columns(interface_scope: str | None) -> list[dict]:
 
 def _network_bar_chart_title(interface_scope: str | None) -> str:
     if interface_scope == "backbone":
-        return "Top Billable Interfaces — 95th Percentile (Gbps)"
+        return "Top 10 Billable Interfaces — P95 Preview (Gbps)"
     if interface_scope == "router_uplink":
-        return "Top Router Uplinks — 95th Percentile (Gbps)"
-    return "Top 95th Percentile Interfaces (Gbps)"
+        return "Top 10 Router Uplinks — P95 Preview (Gbps)"
+    return "Top 10 Interfaces — P95 Preview (Gbps)"
 
 
-def _build_network_dashboard_subtab(
+def _network_table_section_titles(interface_scope: str | None, billing: bool) -> tuple[str, str]:
+    if billing:
+        return (
+            "Billable Interface Table",
+            "P95 interface utilization for all in-scope interfaces",
+        )
+    return (
+        "Interface Utilization Table",
+        "P95 utilization across interfaces in the selected scope",
+    )
+
+
+def _network_page_flags(top_scope: str | None, switch_role: str | None = None) -> dict:
+    scope = top_scope or "overview"
+    iface_scope = resolve_network_interface_scope(scope, switch_role)
+    billing = iface_scope in ("backbone", "router_uplink")
+    switch_segment = switch_role or "backbone"
+    return {
+        "top_scope": scope,
+        "interface_scope": iface_scope,
+        "billing": billing,
+        "show_export": billing,
+        "show_donut_grid": scope == "overview",
+        "show_single_gauge": scope == "switch" and switch_segment == "leaf",
+        "show_preview_collapse": billing or scope == "overview",
+        "is_interface_page": scope in ("overview", "switch", "router_uplink"),
+    }
+
+
+def _firewall_aggregate_kpis(firewall_data: dict) -> tuple[int, int, int, int]:
+    devices = (firewall_data or {}).get("devices") or []
+    total_sessions = sum(int(d.get("active_sessions") or 0) for d in devices)
+    total_intrusions = sum(int(d.get("intrusions_detected") or 0) for d in devices)
+    ha_pairs = sum(1 for d in devices if (d.get("ha_mode") or "").strip())
+    return len(devices), total_sessions, total_intrusions, ha_pairs
+
+
+def _interface_table_rows(items: list) -> list[dict]:
+    rows = []
+    for it in items or []:
+        rows.append(
+            {
+                "host": it.get("host") or "",
+                "interface_name": it.get("interface_name") or "",
+                "interface_alias": it.get("interface_alias") or "",
+                "p95_rx_gbps": round(_bps_to_gbps(it.get("p95_rx_bps")), 3),
+                "p95_tx_gbps": round(_bps_to_gbps(it.get("p95_tx_bps")), 3),
+                "p95_total_gbps": round(_bps_to_gbps(it.get("p95_total_bps")), 3),
+                "speed_gbps": round(_bps_to_gbps(it.get("speed_bps")), 3),
+                "utilization_pct": round(float(it.get("utilization_pct") or 0), 2),
+            }
+        )
+    return rows
+
+
+def _build_network_interface_page(
     net_filters: dict,
     port_summary: dict,
     percentile_data: dict,
@@ -1551,24 +2344,22 @@ def _build_network_dashboard_subtab(
     top_scope: str = "overview",
     switch_role: str = "backbone",
 ):
-    """
-    Network interface panel (overview, switch roles, router uplinks):
-    - Scope-aware filters (Manufacturer -> Device)
-    - KPI cards, donuts, p95 bar chart, paginated billing table
-    """
+    """Interface utilization page (overview, switch segments, router uplinks)."""
+    flags = _network_page_flags(top_scope, switch_role)
+    interface_scope = flags["interface_scope"]
+    billing = flags["billing"]
+    kpi1, kpi2, kpi3, kpi4 = _network_kpi_labels(interface_scope)
+    table_title, table_subtitle = _network_table_section_titles(interface_scope, billing)
+
     net_filters = net_filters or {}
     port_summary = port_summary or {}
     percentile_data = percentile_data or {}
     interface_table = interface_table or {}
 
-    interface_scope = resolve_network_interface_scope(top_scope, switch_role)
-    kpi1, kpi2, kpi3, kpi4 = _network_kpi_labels(interface_scope)
-
     device_count = int(port_summary.get("device_count", 0) or 0)
     total_ports = int(port_summary.get("total_ports", 0) or 0)
     active_ports = int(port_summary.get("active_ports", 0) or 0)
     avg_icmp_loss_pct = float(port_summary.get("avg_icmp_loss_pct", 0) or 0)
-
     port_availability_pct = pct_float(active_ports, total_ports)
     icmp_availability_pct = max(0.0, min(100.0, 100.0 - avg_icmp_loss_pct))
     overall_util_pct = float(percentile_data.get("overall_port_utilization_pct", 0) or 0)
@@ -1582,21 +2373,14 @@ def _build_network_dashboard_subtab(
             for dev_list in (roles_map or {}).values():
                 devs.update(dev_list or [])
             devices_by_manufacturer[manu] = sorted(devs)
+    devices_all = sorted({d for devs in devices_by_manufacturer.values() for d in (devs or [])})
 
-    devices_all = sorted(
-        {d for devs in devices_by_manufacturer.values() for d in (devs or [])}
-    )
-
-    manufacturers_data = [{"label": m, "value": m} for m in manufacturers]
-    devices_data = [{"label": d, "value": d} for d in devices_all]
-
-    kpi4_value = (
-        f"{overall_util_pct:.1f}%"
-        if interface_scope == "backbone"
-        else (f"{port_availability_pct:.1f}%" if kpi4 != "ICMP Availability" else f"{icmp_availability_pct:.1f}%")
-    )
-    if kpi4 == "ICMP Availability":
+    if kpi4 == "P95 Utilization":
+        kpi4_value = f"{overall_util_pct:.1f}%"
+    elif kpi4 == "ICMP Availability":
         kpi4_value = f"{icmp_availability_pct:.1f}%"
+    else:
+        kpi4_value = f"{port_availability_pct:.1f}%"
 
     kpis = dmc.SimpleGrid(
         cols=4,
@@ -1608,7 +2392,7 @@ def _build_network_dashboard_subtab(
             _kpi(
                 kpi4,
                 kpi4_value,
-                _DC_ICONS["port_availability"] if kpi4 != "P95 Utilization" else _DC_ICONS["active_ports"],
+                _DC_ICONS["active_ports"] if kpi4 == "P95 Utilization" else _DC_ICONS["port_availability"],
                 color="indigo",
                 stagger=4,
             ),
@@ -1617,84 +2401,34 @@ def _build_network_dashboard_subtab(
 
     donut_active = create_premium_gauge_chart(
         port_availability_pct,
-        "Port Availability" if interface_scope != "backbone" else "Interface Availability",
+        "Interface Availability" if billing else "Port Availability",
         color="#FFB547",
     )
     donut_util = create_premium_gauge_chart(
         overall_util_pct,
-        "P95 Utilization" if interface_scope == "backbone" else "Port Utilization",
+        "P95 Utilization" if billing else "Port Utilization",
         color="#05CD99",
     )
     donut_icmp = create_premium_gauge_chart(icmp_availability_pct, "ICMP Availability", color="#4318FF")
+    single_gauge = create_premium_gauge_chart(overall_util_pct, "P95 Utilization", color="#05CD99")
 
     top_interfaces = percentile_data.get("top_interfaces") or []
     bar_labels = [
         (t.get("interface_alias") or t.get("interface_name") or "").strip() or "Unknown"
-        for t in top_interfaces
+        for t in top_interfaces[:10]
     ]
-    bar_values = [_bps_to_gbps(t.get("p95_total_bps")) for t in top_interfaces]
+    bar_values = [_bps_to_gbps(t.get("p95_total_bps")) for t in top_interfaces[:10]]
     bar_fig = create_premium_horizontal_bar_chart(
         labels=bar_labels,
         values=bar_values,
         title=_network_bar_chart_title(interface_scope),
         unit_suffix="Gbps",
-        height=360,
+        height=280,
     )
 
-    # Interface table (initial page=1)
     items = interface_table.get("items") or []
-    rows = []
-    for it in items:
-        rows.append(
-            {
-                "host": it.get("host") or "",
-                "interface_name": it.get("interface_name") or "",
-                "interface_alias": it.get("interface_alias") or "",
-                "p95_rx_gbps": round(_bps_to_gbps(it.get("p95_rx_bps")), 3),
-                "p95_tx_gbps": round(_bps_to_gbps(it.get("p95_tx_bps")), 3),
-                "p95_total_gbps": round(_bps_to_gbps(it.get("p95_total_bps")), 3),
-                "speed_gbps": round(_bps_to_gbps(it.get("speed_bps")), 3),
-                "utilization_pct": round(float(it.get("utilization_pct") or 0), 2),
-            }
-        )
-
+    total_count = int(interface_table.get("total") or len(items))
     columns = _network_interface_table_columns(interface_scope)
-
-    data_table = dash_table.DataTable(
-        id="net-interface-table",
-        columns=columns,
-        data=rows,
-        page_current=0,
-        page_size=50,
-        page_action="custom",
-        sort_action="native",
-        style_table={"overflowX": "auto", "marginTop": "6px"},
-        style_cell={
-            "padding": "10px 14px",
-            "color": "#2B3674",
-            "fontFamily": "DM Sans, sans-serif",
-            "fontSize": "0.82rem",
-            "borderColor": "#F4F7FE",
-            "fontWeight": 500,
-        },
-        style_header={
-            "backgroundColor": "#F8F9FC",
-            "color": "#A3AED0",
-            "fontWeight": 700,
-            "fontFamily": "DM Sans, sans-serif",
-            "fontSize": "0.72rem",
-            "textTransform": "uppercase",
-            "letterSpacing": "0.05em",
-            "borderBottom": "2px solid #E9EDF7",
-        },
-        style_data_conditional=[
-            {
-                "if": {"state": "active"},
-                "backgroundColor": "rgba(67, 24, 255, 0.04)",
-                "border": "1px solid rgba(67, 24, 255, 0.1)",
-            },
-        ],
-    )
 
     return dmc.Stack(
         gap="lg",
@@ -1707,7 +2441,7 @@ def _build_network_dashboard_subtab(
                         id="net-manufacturer-selector",
                         label="Manufacturer",
                         placeholder="All manufacturers",
-                        data=manufacturers_data,
+                        data=[{"label": m, "value": m} for m in manufacturers],
                         value=None,
                         clearable=True,
                         searchable=True,
@@ -1717,96 +2451,205 @@ def _build_network_dashboard_subtab(
                         id="net-device-selector",
                         label="Device",
                         placeholder="All devices",
-                        data=devices_data,
+                        data=[{"label": d, "value": d} for d in devices_all],
                         value=None,
                         clearable=True,
                         searchable=True,
                         nothingFoundMessage="No devices",
                     ),
                 ],
-                style={"marginTop": "10px"},
             ),
-
             html.Div(id="net-kpi-container", children=kpis),
-
-            dmc.SimpleGrid(
-                cols=3,
-                spacing="lg",
+            html.Div(
+                id="net-donut-grid-wrap",
+                style={"display": "block" if flags["show_donut_grid"] else "none"},
                 children=[
-                    _chart_card(
-                        html.Div(
-                            style={"width": "100%", "aspectRatio": "16 / 11", "maxWidth": "360px", "margin": "0 auto"},
-                            children=dcc.Graph(
-                                id="net-donut-active-ports",
-                                figure=donut_active,
-                                config={"displayModeBar": False, "responsive": True},
-                                style={"height": "100%", "width": "100%"},
+                    dmc.SimpleGrid(
+                        cols=3,
+                        spacing="lg",
+                        children=[
+                            _chart_card(
+                                dcc.Graph(
+                                    id="net-donut-active-ports",
+                                    figure=donut_active,
+                                    config={"displayModeBar": False},
+                                )
                             ),
-                        )
-                    ),
-                    _chart_card(
-                        html.Div(
-                            style={"width": "100%", "aspectRatio": "16 / 11", "maxWidth": "360px", "margin": "0 auto"},
-                            children=dcc.Graph(
-                                id="net-donut-utilization",
-                                figure=donut_util,
-                                config={"displayModeBar": False, "responsive": True},
-                                style={"height": "100%", "width": "100%"},
+                            _chart_card(
+                                dcc.Graph(
+                                    id="net-donut-utilization",
+                                    figure=donut_util,
+                                    config={"displayModeBar": False},
+                                )
                             ),
-                        )
-                    ),
-                    _chart_card(
-                        html.Div(
-                            style={"width": "100%", "aspectRatio": "16 / 11", "maxWidth": "360px", "margin": "0 auto"},
-                            children=dcc.Graph(
-                                id="net-donut-icmp",
-                                figure=donut_icmp,
-                                config={"displayModeBar": False, "responsive": True},
-                                style={"height": "100%", "width": "100%"},
+                            _chart_card(
+                                dcc.Graph(
+                                    id="net-donut-icmp",
+                                    figure=donut_icmp,
+                                    config={"displayModeBar": False},
+                                )
                             ),
-                        )
-                    ),
+                        ],
+                    )
                 ],
             ),
-
             html.Div(
-                className="nexus-card",
-                style={"padding": "20px"},
+                id="net-single-gauge-wrap",
+                style={"display": "block" if flags["show_single_gauge"] else "none"},
                 children=[
-                    _section_title("Bandwidth (95th Percentile)", "Top consumers across the selected time range"),
                     _chart_card(
                         dcc.Graph(
-                            id="net-top-interfaces-bar",
-                            figure=bar_fig,
+                            id="net-single-util-gauge",
+                            figure=single_gauge,
                             config={"displayModeBar": False},
-                            style={"height": "320px"},
                         )
-                    ),
+                    )
                 ],
             ),
-
             html.Div(
-                id="net-interface-section",
                 className="nexus-card",
                 style={"padding": "20px"},
                 children=[
-                    _section_title("Interface Details", "Paginated p95 bandwidth table"),
-                    dmc.TextInput(
-                        id="net-interface-search",
-                        placeholder="Search host / interface / alias...",
-                        value="",
-                        leftSection=DashIconify(icon="solar:magnifer-linear", width=16, color="#A3AED0"),
-                        style={"marginTop": "6px", "marginBottom": "6px"},
+                    dmc.Group(
+                        justify="space-between",
+                        align="flex-end",
+                        children=[
+                            html.Div(
+                                children=[
+                                    _section_title(table_title, table_subtitle),
+                                ]
+                            ),
+                            html.Div(
+                                id="net-export-btn-wrap",
+                                style={"display": "block" if flags["show_export"] else "none"},
+                                children=[
+                                    dmc.Button(
+                                        "Export All CSV",
+                                        id="net-interface-export-btn",
+                                        variant="light",
+                                        color="indigo",
+                                        leftSection=DashIconify(icon="solar:download-minimalistic-linear", width=16),
+                                    ),
+                                ],
+                            ),
+                        ],
                     ),
-                    data_table,
+                    dmc.Group(
+                        grow=True,
+                        align="flex-end",
+                        children=[
+                            dmc.TextInput(
+                                id="net-interface-search",
+                                placeholder="Search host / interface / alias...",
+                                value="",
+                                leftSection=DashIconify(icon="solar:magnifer-linear", width=16, color="#A3AED0"),
+                            ),
+                            dmc.Select(
+                                id="net-interface-page-size",
+                                label="Rows per page",
+                                data=[
+                                    {"label": "50", "value": "50"},
+                                    {"label": "100", "value": "100"},
+                                    {"label": "200", "value": "200"},
+                                ],
+                                value="50",
+                                allowDeselect=False,
+                                style={"maxWidth": "160px"},
+                            ),
+                        ],
+                    ),
+                    dmc.Text(
+                        id="net-interface-table-footer",
+                        children=f"Showing 1–{min(len(items), 50)} of {total_count:,} interfaces",
+                        size="sm",
+                        c="dimmed",
+                        style={"marginTop": "8px", "marginBottom": "4px"},
+                    ),
+                    dash_table.DataTable(
+                        id="net-interface-table",
+                        columns=columns,
+                        data=_interface_table_rows(items),
+                        page_current=0,
+                        page_size=50,
+                        page_action="custom",
+                        sort_action="native",
+                        style_table={"overflowX": "auto", "marginTop": "6px"},
+                        style_cell={
+                            "padding": "10px 14px",
+                            "color": "#2B3674",
+                            "fontFamily": "DM Sans, sans-serif",
+                            "fontSize": "0.82rem",
+                            "borderColor": "#F4F7FE",
+                            "fontWeight": 500,
+                        },
+                        style_header={
+                            "backgroundColor": "#F8F9FC",
+                            "color": "#A3AED0",
+                            "fontWeight": 700,
+                            "fontFamily": "DM Sans, sans-serif",
+                            "fontSize": "0.72rem",
+                            "textTransform": "uppercase",
+                            "letterSpacing": "0.05em",
+                            "borderBottom": "2px solid #E9EDF7",
+                        },
+                    ),
                 ],
             ),
-            html.Div(id="net-special-section", style={"display": "none"}),
+            html.Div(
+                id="net-preview-collapse-wrap",
+                style={"display": "block" if flags["show_preview_collapse"] else "none"},
+                children=[
+                    dmc.Collapse(
+                        id="net-top-preview-collapse",
+                        **{"in": False},
+                        children=[
+                            html.Div(
+                                className="nexus-card",
+                                style={"padding": "20px", "marginTop": "8px"},
+                                children=[
+                                    _section_title(
+                                        "Interface Utilization (95th Percentile)",
+                                        "Top 10 preview — use the table above for full billing data",
+                                    ),
+                                    _chart_card(
+                                        dcc.Graph(
+                                            id="net-top-interfaces-bar",
+                                            figure=bar_fig,
+                                            config={"displayModeBar": False},
+                                            style={"height": "280px"},
+                                        )
+                                    ),
+                                ],
+                            )
+                        ],
+                    ),
+                    dmc.Button(
+                        "Show Top 10 Preview",
+                        id="net-top-preview-toggle",
+                        variant="subtle",
+                        color="gray",
+                        size="xs",
+                        style={"marginTop": "6px"},
+                    ),
+                ],
+            ),
+            dcc.Download(id="net-interface-export-download"),
         ],
     )
 
 
-def _build_network_firewall_table(firewall_data: dict) -> html.Div:
+def _build_network_firewall_page(firewall_data: dict) -> html.Div:
+    device_count, total_sessions, total_intrusions, ha_pairs = _firewall_aggregate_kpis(firewall_data)
+    kpis = dmc.SimpleGrid(
+        cols=4,
+        spacing="lg",
+        children=[
+            _kpi("Firewall Devices", f"{device_count:,}", _DC_ICONS["total_devices"], color="indigo"),
+            _kpi("Active Sessions", f"{total_sessions:,}", _DC_ICONS["active_ports"], color="indigo"),
+            _kpi("Intrusions", f"{total_intrusions:,}", _DC_ICONS["port_availability"], color="indigo"),
+            _kpi("HA Devices", f"{ha_pairs:,}", _DC_ICONS["total_ports"], color="indigo"),
+        ],
+    )
     devices = (firewall_data or {}).get("devices") or []
     rows = [
         {
@@ -1826,38 +2669,44 @@ def _build_network_firewall_table(firewall_data: dict) -> html.Div:
         }
         for d in devices
     ]
-    return html.Div(
-        className="nexus-card",
-        style={"padding": "20px"},
+    return dmc.Stack(
+        gap="lg",
         children=[
-            _section_title("Firewall Devices", "Sessions, HA mode and security counters"),
-            dash_table.DataTable(
-                id="net-firewall-table",
-                columns=[
-                    {"name": "Host", "id": "host"},
-                    {"name": "Device", "id": "device_name"},
-                    {"name": "Manufacturer", "id": "manufacturer_name"},
-                    {"name": "CPU %", "id": "cpu_utilization_pct", "type": "numeric"},
-                    {"name": "Memory %", "id": "memory_utilization_pct", "type": "numeric"},
-                    {"name": "Sessions", "id": "active_sessions", "type": "numeric"},
-                    {"name": "Intrusions", "id": "intrusions_detected", "type": "numeric"},
-                    {"name": "Blocked", "id": "intrusions_blocked", "type": "numeric"},
-                    {"name": "Session Rate", "id": "session_setup_rate", "type": "numeric"},
-                    {"name": "HA Mode", "id": "ha_mode"},
-                    {"name": "HA Cluster", "id": "ha_cluster_name"},
-                    {"name": "ICMP Status", "id": "icmp_status"},
-                    {"name": "ICMP Loss %", "id": "icmp_loss_pct", "type": "numeric"},
+            html.Div(id="net-fw-kpi-container", children=kpis),
+            html.Div(
+                className="nexus-card",
+                style={"padding": "20px"},
+                children=[
+                    _section_title("Firewall Devices", "Sessions, HA mode and security counters"),
+                    dash_table.DataTable(
+                        id="net-firewall-table",
+                        columns=[
+                            {"name": "Host", "id": "host"},
+                            {"name": "Device", "id": "device_name"},
+                            {"name": "Manufacturer", "id": "manufacturer_name"},
+                            {"name": "CPU %", "id": "cpu_utilization_pct", "type": "numeric"},
+                            {"name": "Memory %", "id": "memory_utilization_pct", "type": "numeric"},
+                            {"name": "Sessions", "id": "active_sessions", "type": "numeric"},
+                            {"name": "Intrusions", "id": "intrusions_detected", "type": "numeric"},
+                            {"name": "Blocked", "id": "intrusions_blocked", "type": "numeric"},
+                            {"name": "Session Rate", "id": "session_setup_rate", "type": "numeric"},
+                            {"name": "HA Mode", "id": "ha_mode"},
+                            {"name": "HA Cluster", "id": "ha_cluster_name"},
+                            {"name": "ICMP Status", "id": "icmp_status"},
+                            {"name": "ICMP Loss %", "id": "icmp_loss_pct", "type": "numeric"},
+                        ],
+                        data=rows,
+                        page_size=25,
+                        sort_action="native",
+                        style_table={"overflowX": "auto", "marginTop": "8px"},
+                    ),
                 ],
-                data=rows,
-                page_size=25,
-                sort_action="native",
-                style_table={"overflowX": "auto", "marginTop": "8px"},
             ),
         ],
     )
 
 
-def _build_network_load_balancer_table(lb_data: dict) -> html.Div:
+def _build_network_load_balancer_page(lb_data: dict) -> html.Div:
     devices = (lb_data or {}).get("devices") or []
     rows = [
         {
@@ -1872,9 +2721,8 @@ def _build_network_load_balancer_table(lb_data: dict) -> html.Div:
         }
         for d in devices
     ]
-    return html.Div(
-        className="nexus-card",
-        style={"padding": "20px"},
+    return dmc.Stack(
+        gap="lg",
         children=[
             dmc.Alert(
                 "Citrix ADC vserver metrics (RX/TX byte rate, customer vserver name) are not yet "
@@ -1882,25 +2730,30 @@ def _build_network_load_balancer_table(lb_data: dict) -> html.Div:
                 title="Vserver metrics pending",
                 color="yellow",
                 radius="md",
-                style={"marginBottom": "12px"},
             ),
-            _section_title("Load Balancer Health", "ICMP/CPU/RAM and port summary"),
-            dash_table.DataTable(
-                id="net-load-balancer-table",
-                columns=[
-                    {"name": "Host", "id": "host"},
-                    {"name": "Device", "id": "device_name"},
-                    {"name": "Manufacturer", "id": "manufacturer_name"},
-                    {"name": "CPU %", "id": "cpu_utilization_pct", "type": "numeric"},
-                    {"name": "Memory %", "id": "memory_utilization_pct", "type": "numeric"},
-                    {"name": "ICMP Loss %", "id": "icmp_loss_pct", "type": "numeric"},
-                    {"name": "Active Ports", "id": "active_ports", "type": "numeric"},
-                    {"name": "Total Ports", "id": "total_ports", "type": "numeric"},
+            html.Div(
+                className="nexus-card",
+                style={"padding": "20px"},
+                children=[
+                    _section_title("Load Balancer Health", "ICMP/CPU/RAM and port summary"),
+                    dash_table.DataTable(
+                        id="net-load-balancer-table",
+                        columns=[
+                            {"name": "Host", "id": "host"},
+                            {"name": "Device", "id": "device_name"},
+                            {"name": "Manufacturer", "id": "manufacturer_name"},
+                            {"name": "CPU %", "id": "cpu_utilization_pct", "type": "numeric"},
+                            {"name": "Memory %", "id": "memory_utilization_pct", "type": "numeric"},
+                            {"name": "ICMP Loss %", "id": "icmp_loss_pct", "type": "numeric"},
+                            {"name": "Active Ports", "id": "active_ports", "type": "numeric"},
+                            {"name": "Total Ports", "id": "total_ports", "type": "numeric"},
+                        ],
+                        data=rows,
+                        page_size=25,
+                        sort_action="native",
+                        style_table={"overflowX": "auto", "marginTop": "8px"},
+                    ),
                 ],
-                data=rows,
-                page_size=25,
-                sort_action="native",
-                style_table={"overflowX": "auto", "marginTop": "8px"},
             ),
         ],
     )
@@ -1919,13 +2772,13 @@ def _build_network_zabbix_section(
     visible_scopes = _visible_network_scopes(sec_check=check)
     default_scope = visible_scopes[0] if visible_scopes else "overview"
     default_switch_role = SWITCH_ROLE_SCOPES[0]
+    iface_flags = _network_page_flags(default_scope, default_switch_role)
+    show_iface = iface_flags["is_interface_page"]
+    show_fw = default_scope == "firewall"
+    show_lb = default_scope == "load_balancer"
+
     tab_items = [
         dmc.TabsTab(NETWORK_TOP_LABELS[scope][0], value=scope)
-        for scope in visible_scopes
-        if scope in NETWORK_TOP_LABELS
-    ]
-    tab_panels = [
-        dmc.TabsPanel(value=scope, children=html.Div())
         for scope in visible_scopes
         if scope in NETWORK_TOP_LABELS
     ]
@@ -1938,10 +2791,7 @@ def _build_network_zabbix_section(
                 color="indigo",
                 variant="outline",
                 radius="md",
-                children=[
-                    dmc.TabsList(children=tab_items),
-                    *tab_panels,
-                ],
+                children=[dmc.TabsList(children=tab_items)],
             )
         )
         zabbix_children.append(
@@ -1971,18 +2821,39 @@ def _build_network_zabbix_section(
             )
         )
         zabbix_children.append(
-            _build_network_dashboard_subtab(
-                net_filters,
-                port_summary,
-                percentile_data,
-                interface_table,
-                top_scope=default_scope,
-                switch_role=default_switch_role,
+            html.Div(
+                id="net-page-interface",
+                style={"display": "block" if show_iface else "none"},
+                children=[
+                    _build_network_interface_page(
+                        net_filters,
+                        port_summary,
+                        percentile_data,
+                        interface_table,
+                        top_scope=default_scope if default_scope != "switch" else "switch",
+                        switch_role=default_switch_role,
+                    )
+                ],
+            )
+        )
+        zabbix_children.append(
+            html.Div(
+                id="net-page-firewall",
+                style={"display": "block" if show_fw else "none"},
+                children=[_build_network_firewall_page(firewall_data)],
+            )
+        )
+        zabbix_children.append(
+            html.Div(
+                id="net-page-load-balancer",
+                style={"display": "block" if show_lb else "none"},
+                children=[_build_network_load_balancer_page(lb_data)],
             )
         )
     return html.Div(
         style={"padding": "0 30px"},
         children=[
+            dcc.Store(id="net-filters-store", data=net_filters or {}),
             dcc.Store(id="net-firewall-store", data=firewall_data or {}),
             dcc.Store(id="net-load-balancer-store", data=lb_data or {}),
             dmc.Stack(gap="lg", children=zabbix_children),
@@ -2091,6 +2962,8 @@ def _build_storage_section_with_san(
             )
         ],
     )
+
+
 def _build_intel_storage_subtab(device_list: list[dict], zabbix_storage_capacity: dict, zabbix_storage_trend: dict):
     """Intel Storage subtab (Zabbix)."""
     device_list = device_list or []
@@ -2141,7 +3014,7 @@ def _build_intel_storage_subtab(device_list: list[dict], zabbix_storage_capacity
         className="nexus-card dc-chart-card",
         style={
             "padding": "24px 28px",
-            "height": "250px",
+            "height": "300px",
             "display": "flex",
             "flexDirection": "column",
             "justifyContent": "center",
@@ -2256,8 +3129,14 @@ def _build_intel_storage_subtab(device_list: list[dict], zabbix_storage_capacity
                 )]
                 if (_intel_cards := list(filter(None, [
                     total_capacity_card if total_bytes > 0 else None,
-                    _chart_card(dcc.Graph(id="intel-donut-used", figure=donut_used, config={"displayModeBar": False})) if used_bytes > 0 else None,
-                    _chart_card(dcc.Graph(id="intel-donut-free", figure=donut_free, config={"displayModeBar": False})) if (total_bytes - used_bytes) > 0 else None,
+                    _chart_card(html.Div(
+                        style={"width": "100%", "aspectRatio": "16 / 11", "maxWidth": "360px", "margin": "0 auto"},
+                        children=dcc.Graph(id="intel-donut-used", figure=donut_used, config={"displayModeBar": False, "responsive": True}, style={"height": "100%", "width": "100%"}),
+                    )) if used_bytes > 0 else None,
+                    _chart_card(html.Div(
+                        style={"width": "100%", "aspectRatio": "16 / 11", "maxWidth": "360px", "margin": "0 auto"},
+                        children=dcc.Graph(id="intel-donut-free", figure=donut_free, config={"displayModeBar": False, "responsive": True}, style={"height": "100%", "width": "100%"}),
+                    )) if (total_bytes - used_bytes) > 0 else None,
                 ]))) and (_intel_cols := min(len(_intel_cards), 3)) is not None
                 else []
             ),
@@ -2281,42 +3160,57 @@ def _build_intel_storage_subtab(device_list: list[dict], zabbix_storage_capacity
     )
 
 
-def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict, san_bottleneck: dict | None = None):
-    """IBM Storage subtab (reuses Power panel data, but focuses on storage)."""
+def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict):
+    """IBM Storage subtab — physical vs efficient capacity with topology/layer labels."""
     storage_capacity = storage_capacity or {}
     storage_performance = storage_performance or {}
-    san_bottleneck = san_bottleneck or {}
 
     systems = storage_capacity.get("systems") or []
     storage_system_count = len(systems)
 
-    total_gb = sum(parse_storage_string(s.get("total_mdisk_capacity")) for s in systems)
-    used_gb = sum(parse_storage_string(s.get("total_used_capacity")) for s in systems)
-    free_gb = sum(parse_storage_string(s.get("total_free_space")) for s in systems)
-    storage_pct = pct_float(used_gb, total_gb)
+    caps = aggregate_ibm_storage_capacities(systems, parse_storage_string)
+    phys_total_gb = caps["phys_total_gb"]
+    phys_used_gb = caps["phys_used_gb"]
+    phys_free_gb = caps["phys_free_gb"]
+    eff_total_gb = caps["eff_total_gb"]
+    eff_used_gb = caps["eff_used_gb"]
+    eff_free_gb = caps["eff_free_gb"]
+    storage_pct = caps["utilization_pct"]
 
-    # Storage systems breakdown — premium system cards with used/free split bar
+    def _topology_badge(topology: str | None):
+        topo = (topology or "standard").strip().lower()
+        if topo == "hyperswap":
+            return dmc.Badge("Hyperswap", color="violet", variant="light", size="sm")
+        return dmc.Badge("Standard", color="blue", variant="light", size="sm")
+
+    def _layer_badge(layer: str | None):
+        lay = (layer or "storage").strip().lower()
+        if lay == "replication":
+            return dmc.Badge("Replication", color="orange", variant="outline", size="sm")
+        return dmc.Badge("Storage", color="gray", variant="outline", size="sm")
+
+    # Storage systems breakdown — physical used/free with topology and layer badges
     def _storage_system_rows():
         rows = []
         for s in systems:
             name = s.get("name") or s.get("storage_ip") or "System"
-            used = parse_storage_string(s.get("total_used_capacity"))
-            free = parse_storage_string(s.get("total_free_space"))
-            total = used + free
+            sys_caps = compute_system_capacities_gb(s, parse_storage_string)
+            used = sys_caps["phys_used_gb"]
+            free = sys_caps["phys_free_gb"]
+            total = sys_caps["phys_total_gb"]
+            eff_total = sys_caps["eff_total_gb"]
+            eff_free = sys_caps["eff_free_gb"]
             used_pct = (used / total * 100) if total > 0 else 0
             free_pct = 100 - used_pct
             if used_pct >= 80:
                 used_grad = "linear-gradient(90deg, #FF6B6B, #EE5D50)"
                 used_color = "#EE5D50"
-                badge_bg  = "rgba(238,93,80,0.12)"
             elif used_pct >= 60:
                 used_grad = "linear-gradient(90deg, #FFD080, #FFB547)"
                 used_color = "#FFB547"
-                badge_bg  = "rgba(255,181,71,0.12)"
             else:
                 used_grad = "linear-gradient(90deg, #868CFF, #4318FF)"
                 used_color = "#4318FF"
-                badge_bg  = "rgba(67,24,255,0.08)"
 
             rows.append(html.Div(
                 style={
@@ -2326,19 +3220,35 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                     "padding": "16px 20px",
                 },
                 children=[
-                    # Top: name
                     html.Div(
-                        style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "14px"},
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "justifyContent": "space-between",
+                            "flexWrap": "wrap",
+                            "gap": "8px",
+                            "marginBottom": "14px",
+                        },
                         children=[
-                            html.Div(style={"width": "8px", "height": "8px", "borderRadius": "50%", "background": used_color, "flexShrink": 0}),
-                            html.Span(name, style={"fontWeight": 700, "fontSize": "0.9rem", "color": "#2B3674", "fontFamily": "DM Sans"}),
+                            html.Div(
+                                style={"display": "flex", "alignItems": "center", "gap": "8px", "minWidth": 0},
+                                children=[
+                                    html.Div(style={"width": "8px", "height": "8px", "borderRadius": "50%", "background": used_color, "flexShrink": 0}),
+                                    html.Span(name, style={"fontWeight": 700, "fontSize": "0.9rem", "color": "#2B3674", "fontFamily": "DM Sans"}),
+                                ],
+                            ),
+                            html.Div(
+                                style={"display": "flex", "alignItems": "center", "gap": "6px", "flexWrap": "wrap"},
+                                children=[
+                                    _layer_badge(s.get("layer")),
+                                    _topology_badge(s.get("topology")),
+                                ],
+                            ),
                         ],
                     ),
-                    # Split bar: used + free side by side
                     html.Div(
                         style={"display": "flex", "borderRadius": "10px", "overflow": "hidden", "height": "36px", "marginBottom": "12px"},
                         children=[
-                            # Used segment
                             html.Div(
                                 style={
                                     "flex": f"{used_pct}",
@@ -2351,7 +3261,6 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                                     style={"color": "white", "fontSize": "0.78rem", "fontWeight": 700, "fontFamily": "DM Sans"},
                                 ) if used_pct > 10 else None,
                             ),
-                            # Free segment
                             html.Div(
                                 style={
                                     "flex": f"{free_pct}",
@@ -2366,11 +3275,9 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                             ),
                         ],
                     ),
-                    # Legend + stats row
                     html.Div(
                         style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"},
                         children=[
-                            # Left legend
                             html.Div(
                                 style={"display": "flex", "gap": "16px"},
                                 children=[
@@ -2390,12 +3297,22 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                                     ),
                                 ],
                             ),
-                            # Right total
                             html.Span(
                                 f"Total: {smart_storage(total)}",
                                 style={"fontSize": "0.78rem", "color": "#A3AED0", "fontFamily": "DM Sans"},
                             ),
                         ],
+                    ),
+                    html.Div(
+                        f"Efficient: {smart_storage(eff_total)} total / {smart_storage(eff_free)} free",
+                        style={
+                            "fontSize": "0.72rem",
+                            "color": "#15AABF",
+                            "fontFamily": "DM Sans",
+                            "fontStyle": "italic",
+                            "marginTop": "10px",
+                            "opacity": 0.85,
+                        },
                     ),
                 ],
             ))
@@ -2410,78 +3327,57 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
     avg_throughput = (sum(throughput_vals) / len(throughput_vals)) if throughput_vals else 0.0
     avg_latency = (sum(latency_vals) / len(latency_vals)) if latency_vals else 0.0
 
-    issues = san_bottleneck.get("issues") or []
-    has_san_bottleneck = bool(san_bottleneck.get("has_issue", False)) and bool(issues)
-
-    san_bottleneck_panel = (
-        dmc.Alert("No SAN bottleneck detected.", color="teal", radius="md", title="SAN Bottleneck")
-        if not has_san_bottleneck
-        else dmc.Stack(
-            gap="sm",
-            children=[
-                dmc.Alert("Storage/SAN bottleneck risk detected.", color="orange", radius="md", title="SAN Bottleneck"),
-                dmc.Table(
-                    striped=True,
-                    highlightOnHover=True,
-                    withTableBorder=False,
-                    withColumnBorders=False,
-                    style={"tableLayout": "fixed", "width": "100%"},
-                    verticalSpacing="sm",
-                    horizontalSpacing="md",
-                    children=[
-                        html.Thead(
-                            html.Tr(
-                                [
-                                    html.Th(
-                                        "Port",
-                                        style={"color": "#A3AED0", "fontWeight": 600, "fontSize": "0.72rem", "textTransform": "uppercase", "letterSpacing": "0.07em", "width": "50%"},
-                                    ),
-                                    html.Th(
-                                        "Not XCredits",
-                                        style={"color": "#A3AED0", "fontWeight": 600, "fontSize": "0.72rem", "textTransform": "uppercase", "letterSpacing": "0.07em", "textAlign": "right", "width": "25%"},
-                                    ),
-                                    html.Th(
-                                        "Too Many RDys",
-                                        style={"color": "#A3AED0", "fontWeight": 600, "fontSize": "0.72rem", "textTransform": "uppercase", "letterSpacing": "0.07em", "textAlign": "right", "width": "25%"},
-                                    ),
-                                ]
-                            )
-                        ),
-                        html.Tbody(
-                            [
-                                html.Tr(
-                                    [
-                                        html.Td(i.get("portname") or ""),
-                                        html.Td(
-                                            dmc.Badge(str(i.get("swfcportnotxcredits") or 0), color="orange", variant="light", size="sm"),
-                                            style={"textAlign": "right"},
-                                        ),
-                                        html.Td(
-                                            dmc.Badge(str(i.get("swfcporttoomanyrdys") or 0), color="orange", variant="light", size="sm"),
-                                            style={"textAlign": "right"},
-                                        ),
-                                    ]
-                                )
-                                for i in (issues or [])[:8]
-                            ]
-                        ),
-                    ],
-                ),
-            ],
-        )
-    )
-
     return dmc.Stack(
         gap="lg",
         children=[
+            dmc.Text("Physical Storage", size="xs", c="#A3AED0", fw=600, tt="uppercase", style={"letterSpacing": "0.06em"}),
             dmc.SimpleGrid(
-                cols=4,
+                cols={"base": 1, "sm": 2, "md": 5},
                 spacing="lg",
                 children=[
                     _kpi("Storage Systems", f"{storage_system_count:,}", _DC_ICONS["storage_systems"], color="grape"),
-                    _kpi("Total Capacity", smart_storage(total_gb), _DC_ICONS["total_capacity"], color="grape", is_text=True),
-                    _kpi("Used Capacity", smart_storage(used_gb), _DC_ICONS["used_capacity"], color="grape", is_text=True),
+                    _kpi("Physical Total", smart_storage(phys_total_gb), _DC_ICONS["total_capacity"], color="grape", is_text=True),
+                    _kpi("Physical Used", smart_storage(phys_used_gb), _DC_ICONS["used_capacity"], color="grape", is_text=True),
+                    _kpi("Physical Free", smart_storage(phys_free_gb), _DC_ICONS["total_capacity"], color="grape", is_text=True, opacity=0.55),
                     _kpi("Utilization", f"{storage_pct:.1f}%", _DC_ICONS["utilization"], color="grape"),
+                ],
+            ),
+            dmc.Stack(
+                gap="xs",
+                children=[
+                    dmc.Text("Efficient Storage", size="xs", c="#15AABF", fw=600, tt="uppercase", style={"letterSpacing": "0.06em", "opacity": 0.9}),
+                    dmc.SimpleGrid(
+                        cols=4,
+                        spacing="lg",
+                        children=[
+                            _kpi(
+                                "Efficient Total",
+                                smart_storage(eff_total_gb),
+                                _DC_ICONS["total_capacity"],
+                                color="cyan",
+                                is_text=True,
+                                opacity=0.85,
+                                background="#F8FBFF",
+                            ),
+                            _kpi(
+                                "Efficient Used",
+                                smart_storage(eff_used_gb),
+                                _DC_ICONS["used_capacity"],
+                                color="cyan",
+                                is_text=True,
+                                background="#F8FBFF",
+                            ),
+                            _kpi(
+                                "Efficient Free",
+                                smart_storage(eff_free_gb),
+                                _DC_ICONS["total_capacity"],
+                                color="cyan",
+                                is_text=True,
+                                opacity=0.5,
+                                background="#F8FBFF",
+                            ),
+                        ],
+                    ),
                 ],
             ),
             dmc.SimpleGrid(
@@ -2493,14 +3389,13 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                         className="nexus-card",
                         style={"padding": "24px", "display": "flex", "flexDirection": "column", "gap": "16px"},
                         children=[
-                            _section_title("Storage Capacity", "Overall utilization"),
+                            _section_title("Storage Capacity", "Physical utilization"),
                             html.Div(
                                 style={"display": "flex", "justifyContent": "center"},
-                                children=[dcc.Graph(
-                                    figure=create_gauge_chart(used_gb, total_gb or 1, "Storage Capacity", color="#FFB547"),
-                                    config={"displayModeBar": False},
-                                    style={"height": "220px", "width": "100%"},
-                                )] if _has_value(total_gb) else [
+                                children=[_gauge_wrap(
+                                    create_gauge_chart(phys_used_gb, phys_total_gb or 1, "", color="#FFB547", height=220),
+                                    "Storage Capacity",
+                                )] if _has_value(phys_total_gb) else [
                                     html.P("No data available.", style={"color": "#A3AED0", "fontSize": "0.85rem", "textAlign": "center", "paddingTop": "60px"}),
                                 ],
                             ),
@@ -2509,18 +3404,18 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                                 style={"display": "flex", "justifyContent": "space-around", "borderTop": "1px solid #F4F7FE", "paddingTop": "16px"},
                                 children=[
                                     html.Div(style={"textAlign": "center"}, children=[
-                                        html.Div(smart_storage(total_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#2B3674", "fontFamily": "DM Sans"}),
-                                        html.Div("Total", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
+                                        html.Div(smart_storage(phys_total_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#2B3674", "fontFamily": "DM Sans"}),
+                                        html.Div("Physical Total", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
                                     ]),
                                     html.Div(style={"width": "1px", "background": "#F4F7FE"}),
                                     html.Div(style={"textAlign": "center"}, children=[
-                                        html.Div(smart_storage(used_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#FFB547", "fontFamily": "DM Sans"}),
-                                        html.Div("Used", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
+                                        html.Div(smart_storage(phys_used_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#FFB547", "fontFamily": "DM Sans"}),
+                                        html.Div("Physical Used", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
                                     ]),
                                     html.Div(style={"width": "1px", "background": "#F4F7FE"}),
                                     html.Div(style={"textAlign": "center"}, children=[
-                                        html.Div(smart_storage(free_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#05CD99", "fontFamily": "DM Sans"}),
-                                        html.Div("Free", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
+                                        html.Div(smart_storage(phys_free_gb), style={"fontWeight": 800, "fontSize": "1.1rem", "color": "#05CD99", "fontFamily": "DM Sans", "opacity": "0.75"}),
+                                        html.Div("Physical Free", style={"fontSize": "0.75rem", "color": "#A3AED0", "fontFamily": "DM Sans", "marginTop": "2px"}),
                                     ]),
                                 ],
                             ),
@@ -2579,20 +3474,31 @@ def _build_ibm_storage_subtab(storage_capacity: dict, storage_performance: dict,
                     ),
                 ],
             ),
-            html.Div(
-                className="nexus-card",
-                style={"padding": "20px"},
-                children=[
-                    _section_title("SAN Bottleneck", "Storage/SAN risk summary"),
-                    san_bottleneck_panel,
-                ],
-            ),
         ],
     )
 
 # ---------------------------------------------------------------------------
 # Main page builder
 # ---------------------------------------------------------------------------
+
+def compute_has_backup(dc_id: str, time_range: dict | None = None) -> bool:
+    """DC için Veeam/Zerto/NetBackup'tan herhangi birinde veri var mı?
+
+    Sidebar'daki 'Backup için ekstra' kontrolünün görünürlüğünü belirlemek için
+    build_dc_view'dan bağımsız hızlı bir probe. Aynı cache'lenmiş api_client
+    wrapper'larını kullanır — DC sayfası açılmışsa hepsi cache hit.
+    """
+    if not dc_id:
+        return False
+    tr = time_range or default_time_range()
+    try:
+        nb = api.get_dc_netbackup_pools(dc_id, tr)
+        zerto = api.get_dc_zerto_sites(dc_id, tr)
+        veeam = api.get_dc_veeam_repos(dc_id, tr)
+    except Exception:
+        return False
+    return bool((nb or {}).get("pools") or (zerto or {}).get("sites") or (veeam or {}).get("repos"))
+
 
 def build_dc_view(dc_id, time_range=None, visible_sections=None):
     """Build DC detail page for the given time range.
@@ -2609,6 +3515,8 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
         return code in visible_sections
 
     tr = time_range or default_time_range()
+    t_total = time.perf_counter()
+    t_batch1 = time.perf_counter()
     batch1 = parallel_execute(
         {
             "data": lambda: api.get_dc_details(dc_id, tr),
@@ -2673,6 +3581,7 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
     dc_desc = (data.get("meta") or {}).get("description") or ""
     dc_display = format_dc_display_name(dc_name, dc_desc)
 
+    t_batch2 = time.perf_counter()
     batch2 = parallel_execute(
         {
             "phys_inv": lambda: api.get_physical_inventory_dc(dc_name),
@@ -2692,7 +3601,7 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
             dmc.Text("Export", size="xs", c="dimmed"),
             dmc.Button("CSV", id="dc-export-csv", size="xs", variant="light", color="gray"),
             dmc.Button("Excel", id="dc-export-xlsx", size="xs", variant="light", color="gray"),
-            dmc.Button("PDF", id="dc-export-pdf", size="xs", variant="light", color="gray"),
+            dmc.Button("PDF", id={"type": "pdf-export-btn", "index": "dc"}, size="xs", variant="light", color="gray"),
         ],
     )
     header_right_extra = list(sla_badges or [])
@@ -2701,23 +3610,42 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
 
     san_switches = batch2["san_switches"]
     has_san = _has_san_data(san_switches)
+    t_san = time.perf_counter()
     san_port_usage = api.get_dc_san_port_usage(dc_id, tr) if has_san else {}
     san_health_alerts = api.get_dc_san_health(dc_id, tr) if has_san else []
     san_traffic_trend = api.get_dc_san_traffic_trend(dc_id, tr) if has_san else []
+    san_ms = round((time.perf_counter() - t_san) * 1000, 1)
 
     net_filters = batch2["net_filters"]
     has_network = bool((net_filters or {}).get("manufacturers"))
     net_port_summary: dict = {}
     net_percentile: dict = {}
     net_interface_table: dict = {}
+    net_interface_export: dict = {}
     net_firewall_data: dict = {}
     net_lb_data: dict = {}
+    net_ms = 0.0
     if has_network:
-        net_port_summary = api.get_dc_network_port_summary(dc_id, tr)
-        net_percentile = api.get_dc_network_95th_percentile(dc_id, tr, top_n=20)
-        net_interface_table = api.get_dc_network_interface_table(dc_id, tr, page=1, page_size=50)
-        net_firewall_data = api.get_dc_network_firewall_summary(dc_id, tr)
-        net_lb_data = api.get_dc_network_load_balancer_summary(dc_id, tr)
+        t_net = time.perf_counter()
+        net_batch = parallel_execute(
+            {
+                "port_summary": lambda: api.get_dc_network_port_summary(dc_id, tr),
+                "percentile": lambda: api.get_dc_network_95th_percentile(dc_id, tr, top_n=20),
+                "interface_table": lambda: api.get_dc_network_interface_table(
+                    dc_id, tr, page=1, page_size=50
+                ),
+                "interface_export": lambda: api.get_dc_network_interface_export(dc_id, tr),
+                "firewall": lambda: api.get_dc_network_firewall_summary(dc_id, tr),
+                "load_balancer": lambda: api.get_dc_network_load_balancer_summary(dc_id, tr),
+            }
+        )
+        net_port_summary = net_batch["port_summary"]
+        net_percentile = net_batch["percentile"]
+        net_interface_table = net_batch["interface_table"]
+        net_interface_export = net_batch["interface_export"]
+        net_firewall_data = net_batch["firewall"]
+        net_lb_data = net_batch["load_balancer"]
+        net_ms = round((time.perf_counter() - t_net) * 1000, 1)
 
     energy    = data.get("energy", {})
     classic   = data.get("classic", {})
@@ -2725,15 +3653,17 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
     power     = data.get("power", {})
 
     # Backup datasets (per DC)
+    t_backup = time.perf_counter()
     nb_data = api.get_dc_netbackup_pools(dc_id, tr)
     zerto_data = api.get_dc_zerto_sites(dc_id, tr)
     veeam_data = api.get_dc_veeam_repos(dc_id, tr)
+    backup_ms = round((time.perf_counter() - t_backup) * 1000, 1)
 
     export_sheets = _build_dc_export_sheets(
         str(dc_id),
         data,
         phys_inv,
-        net_interface_table,
+        net_interface_export or net_interface_table,
         nb_data,
         zerto_data,
         veeam_data,
@@ -2748,16 +3678,21 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
     storage_performance = {}
     san_bottleneck = {}
     if has_power:
+        t_power_storage = time.perf_counter()
         storage_capacity = api.get_dc_storage_capacity(dc_id, tr)
         storage_performance = api.get_dc_storage_performance(dc_id, tr)
         san_bottleneck = api.get_dc_san_bottleneck(dc_id, tr)
+        power_storage_ms = round((time.perf_counter() - t_power_storage) * 1000, 1)
+    else:
+        power_storage_ms = 0.0
 
     # Intel Storage (Zabbix)
     zabbix_storage_capacity = api.get_dc_zabbix_storage_capacity(dc_id, tr)
     has_intel_storage = int(zabbix_storage_capacity.get("storage_device_count", 0) or 0) > 0
+    t_intel_storage = time.perf_counter()
     zabbix_storage_devices = api.get_dc_zabbix_storage_devices(dc_id, tr) if has_intel_storage else []
     zabbix_storage_trend = api.get_dc_zabbix_storage_trend(dc_id, tr) if has_intel_storage else {}
-
+    intel_storage_ms = round((time.perf_counter() - t_intel_storage) * 1000, 1)
     has_storage = bool(has_intel_storage or has_power or has_s3 or has_san)
 
     has_virt = has_classic or has_hyperconv or has_power
@@ -2825,8 +3760,13 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
             ),
         )
 
-    return html.Div([
-        dcc.Store(id="net-filters-store", data=net_filters or {}),
+    return dcc.Loading(
+        id="dc-view-page-loading",
+        type="circle",
+        color="#4318FF",
+        delay_show=200,
+        overlay_style={"visibility": "visible", "backgroundColor": "rgba(244, 247, 254, 0.75)"},
+        children=html.Div([
         dcc.Store(
             id="dc-export-store",
             data={
@@ -2837,6 +3777,7 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
         ),
         dcc.Download(id="dc-export-download"),
         dmc.Tabs(
+            id="dc-main-tabs",
             color="indigo",
             variant="pills",
             radius="md",
@@ -2871,7 +3812,7 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                     children=dmc.Stack(
                         gap="lg",
                         style={"padding": "0 30px"},
-                        children=[_build_summary_tab(data, tr)],
+                        children=[_build_summary_tab(data, tr, dc_id=str(dc_id))],
                     ),
                 ) if show_summary else None,
 
@@ -2881,6 +3822,13 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                     children=html.Div(
                         style={"padding": "0 30px"},
                         children=[
+                            _build_sellable_inline_kpi(
+                                dc_id,
+                                ["virt_classic", "virt_hyperconverged", "virt_power", "virt_power_hana"],
+                                "Virtualization — Total Sellable Potential",
+                                color="violet",
+                                container_id="sellable-virt-total-card",
+                            ),
                             dmc.Tabs(
                                 color="violet",
                                 variant="outline",
@@ -2907,7 +3855,14 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                                                 ),
                                                 html.Div(
                                                     id="classic-virt-panel",
-                                                    children=_build_compute_tab(classic, "Classic Compute", color="blue"),
+                                                    children=_build_compute_tab(classic, "Classic Compute", color="blue", slug="classic"),
+                                                ),
+                                                _build_sellable_inline_kpi(
+                                                    dc_id,
+                                                    "virt_classic",
+                                                    "Klasik Mimari — Sellable Potential",
+                                                    color="blue",
+                                                    container_id="sellable-classic-card",
                                                 ),
                                             ],
                                         ),
@@ -2925,7 +3880,14 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                                                 ),
                                                 html.Div(
                                                     id="hyperconv-virt-panel",
-                                                    children=_build_compute_tab(hyperconv, "Hyperconverged Compute", color="teal"),
+                                                    children=_build_compute_tab(hyperconv, "Hyperconverged Compute", color="teal", slug="hyperconv"),
+                                                ),
+                                                _build_sellable_inline_kpi(
+                                                    dc_id,
+                                                    "virt_hyperconverged",
+                                                    "Hyperconverged Mimari — Sellable Potential",
+                                                    color="teal",
+                                                    container_id="sellable-hyperconv-card",
                                                 ),
                                             ],
                                         ),
@@ -2933,12 +3895,24 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                                     dmc.TabsPanel(
                                         value="power",
                                         pt="lg",
-                                        children=_build_power_tab(
-                                            power,
-                                            energy,
-                                            storage_capacity,
-                                            storage_performance,
-                                            san_bottleneck,
+                                        children=dmc.Stack(
+                                            gap="lg",
+                                            children=[
+                                                _build_power_tab(
+                                                    power,
+                                                    energy,
+                                                    storage_capacity,
+                                                    storage_performance,
+                                                    san_bottleneck,
+                                                ),
+                                                _build_sellable_inline_kpi(
+                                                    dc_id,
+                                                    ["virt_power", "virt_power_hana"],
+                                                    "Power Mimari — Sellable Potential",
+                                                    color="grape",
+                                                    container_id="sellable-power-card",
+                                                ),
+                                            ],
                                         ),
                                     ) if show_power_inner else None,
                                 ],
@@ -2970,25 +3944,40 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                                     dmc.TabsPanel(
                                         value="zerto",
                                         pt="lg",
-                                        children=html.Div(
-                                            id="backup-zerto-panel",
-                                            children=build_zerto_panel(zerto_data, None) if has_zerto else html.Div(),
+                                        children=dmc.Stack(
+                                            gap="lg",
+                                            children=[
+                                                html.Div(
+                                                    id="backup-zerto-panel",
+                                                    children=build_zerto_panel(zerto_data, None) if has_zerto else html.Div(),
+                                                ),
+                                            ],
                                         ),
                                     ) if has_zerto else None,
                                     dmc.TabsPanel(
                                         value="veeam",
                                         pt="lg",
-                                        children=html.Div(
-                                            id="backup-veeam-panel",
-                                            children=build_veeam_panel(veeam_data, None) if has_veeam else html.Div(),
+                                        children=dmc.Stack(
+                                            gap="lg",
+                                            children=[
+                                                html.Div(
+                                                    id="backup-veeam-panel",
+                                                    children=build_veeam_panel(veeam_data, None) if has_veeam else html.Div(),
+                                                ),
+                                            ],
                                         ),
                                     ) if has_veeam else None,
                                     dmc.TabsPanel(
                                         value="netbackup",
                                         pt="lg",
-                                        children=html.Div(
-                                            id="backup-netbackup-panel",
-                                            children=build_netbackup_panel(nb_data, None) if has_netbackup else html.Div(),
+                                        children=dmc.Stack(
+                                            gap="lg",
+                                            children=[
+                                                html.Div(
+                                                    id="backup-netbackup-panel",
+                                                    children=build_netbackup_panel(nb_data, None) if has_netbackup else html.Div(),
+                                                ),
+                                            ],
                                         ),
                                     ) if has_netbackup else None,
                                     dmc.TabsPanel(
@@ -3061,7 +4050,8 @@ def build_dc_view(dc_id, time_range=None, visible_sections=None):
                 else None,
             ],
         )
-    ])
+    ]),
+    )
 
 
 def layout(dc_id=None):
@@ -3128,3 +4118,14 @@ def export_dc_detail(nc, nx, store, time_range, net_filters):
         sections = [("Data", records_to_dataframe([]))]
     csv_body = csv_bytes_with_report_header(report_info, sections)
     return dash_send_csv_bytes(csv_body, base)
+
+
+@callback(
+    Output({"type": "compute-gauge-util", "slug": MATCH}, "style"),
+    Output({"type": "compute-gauge-alloc", "slug": MATCH}, "style"),
+    Input({"type": "compute-gauge-mode", "slug": MATCH}, "value"),
+)
+def _toggle_compute_gauge_mode(mode):
+    if mode == "allocation":
+        return {"display": "none"}, {"display": "block"}
+    return {"display": "block"}, {"display": "none"}
