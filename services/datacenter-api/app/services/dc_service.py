@@ -1,12 +1,14 @@
+from __future__ import annotations
 import os
 import re
 import logging
 import time
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from datetime import datetime, timedelta, timezone
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
-import psycopg2
 from psycopg2 import pool as pg_pool
 from psycopg2 import OperationalError
 from psycopg2.pool import PoolError
@@ -15,10 +17,36 @@ from app.db.queries import nutanix as nq, vmware as vq, ibm as iq, energy as eq
 from app.db.queries import loki as lq, customer as cq, s3 as s3q, backup as bq
 from app.db.queries import brocade as brq, ibm_storage as isq
 from app.db.queries import zabbix_network as znq, zabbix_storage as zsq
+from app.db.queries import discovery_rack as drq
+from app.db.queries import crm_potential as crm_q
+from app.db.queries import netbox_config as nbq
+from app.config import settings
 from app.services import cache_service as cache
 from app.services import query_overrides as qo
-from app.utils.time_range import default_time_range, time_range_to_bounds, cache_time_ranges
+from app.utils.time_range import (
+    default_time_range,
+    time_range_to_bounds,
+    cache_time_ranges,
+    backup_jobs_warm_windows,
+    BACKUP_JOBS_WARM_GRANULARITIES,
+)
 from app.utils.format_units import smart_cpu, smart_memory, smart_storage
+from shared.customer.cache_keys import customer_assets_cache_key
+from shared.vmware.host_cpu_ghz import (
+    DEFAULT_HOST_CPU_GHZ,
+    NETBOX_HOST_CPU_STRINGS,
+    aggregate_vm_allocation,
+    cached_host_map,
+    compute_cpu_overalloc_flags,
+    enrich_customer_vm_cpu_list,
+    enrich_vm_cpu_sales_fields,
+    sum_cpu_real_total,
+)
+from app.services.netbox_viz_filter import (
+    filter_devices_by_role_exclusion,
+    is_role_excluded,
+    load_excluded_roles,
+)
 
 _DC_CODE_RE = re.compile(r'(DC\d+|AZ\d+|ICT\d+|UZ\d+|DH\d+)', re.IGNORECASE)
 
@@ -59,6 +87,23 @@ def _empty_compute_section() -> dict:
         "mem_pct_max": 0.0,
         "mem_pct_min": 0.0,
         "stor_cap": 0.0, "stor_used": 0.0,
+        # VM-level allocation (storage thin-provisioned, CPU/RAM assigned)
+        "stor_provisioned_gb": 0.0,
+        "stor_actual_used_gb": 0.0,
+        "cpu_alloc_ghz_vm":    0.0,
+        "cpu_alloc_ghz_sales": 0.0,
+        "mem_alloc_gb_vm":     0.0,
+        "cpu_overallocated_sales": False,
+        "cpu_overallocated_real": False,
+        "cpu_alloc_hosts_resolved": 0,
+        "cpu_alloc_hosts_fallback_default": 0,
+        "cpu_util_pct": 0.0,
+        "cpu_util_pct_max": 0.0,
+        "mem_util_pct": 0.0,
+        "mem_util_pct_max": 0.0,
+        # Potential sellable economics — CRM TL unit prices × capacity × overcommit
+        "unit_prices": {"cpu_vcpu": 0.0, "ram_gb": 0.0, "storage_gb": 0.0},
+        "sellable_multiplier": 3.3,
     }
 
 
@@ -82,8 +127,16 @@ def _EMPTY_DC(dc_code: str) -> dict:
         },
         "power": {
             "hosts": 0, "vms": 0, "vios": 0, "lpar_count": 0,
-            "cpu": 0, "cpu_used": 0.0, "cpu_assigned": 0.0,
-            "ram": 0, "memory_total": 0.0, "memory_assigned": 0.0,
+            "cpu": 0,
+            "cpu_total_procunits": 0.0,
+            "cpu_total_cores": 0.0,
+            "cpu_available_procunits": 0.0,
+            "cpu_available_cores": 0.0,
+            "cpu_used": 0.0, "cpu_assigned": 0.0,
+            "ram": 0,
+            "memory_total": 0.0,
+            "memory_available": 0.0,
+            "memory_assigned": 0.0,
         },
         "energy": {"total_kw": 0.0, "ibm_kw": 0.0, "vcenter_kw": 0.0, "total_kwh": 0.0, "ibm_kwh": 0.0, "vcenter_kwh": 0.0},
         "platforms": {
@@ -110,7 +163,7 @@ class DatabaseService:
     def __init__(self):
         self._db_host = os.getenv("DB_HOST", "10.134.16.6")
         self._db_port = os.getenv("DB_PORT", "5000")   # Non-standard port — not 5432
-        self._db_name = os.getenv("DB_NAME", "datalake")
+        self._db_name = os.getenv("DB_NAME", "bulutlake")
         self._db_user = os.getenv("DB_USER", "datalakeui")
         self._db_pass = os.getenv("DB_PASS")
         self._pool: pg_pool.ThreadedConnectionPool | None = None
@@ -123,7 +176,11 @@ class DatabaseService:
         # Cache for IBM storage storage_ip -> resolved DC code.
         # Value can be None when no resolution is possible.
         self._ibm_storage_ip_dc_cache: dict[str, str | None] = {}
+        self._webui: Any | None = None
         self._init_pool()
+
+    def attach_webui_pool(self, webui: Any | None) -> None:
+        self._webui = webui
 
     # ------------------------------------------------------------------
     # Connection pool
@@ -133,15 +190,23 @@ class DatabaseService:
         """Create the connection pool. Logs a warning if DB is unreachable at startup."""
         try:
             self._pool = pg_pool.ThreadedConnectionPool(
-                minconn=2,
-                maxconn=16,
+                minconn=max(1, int(settings.db_pool_minconn)),
+                maxconn=max(int(settings.db_pool_minconn), int(settings.db_pool_maxconn)),
                 host=self._db_host,
                 port=self._db_port,
                 dbname=self._db_name,
                 user=self._db_user,
                 password=self._db_pass,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
             )
-            logger.info("DB connection pool initialized (min=2, max=16).")
+            logger.info(
+                "DB connection pool initialized (min=%s, max=%s).",
+                max(1, int(settings.db_pool_minconn)),
+                max(int(settings.db_pool_minconn), int(settings.db_pool_maxconn)),
+            )
         except OperationalError as exc:
             logger.error("Failed to initialize DB pool: %s", exc)
             self._pool = None
@@ -286,11 +351,14 @@ SELECT
     primary_ip_address
 FROM public.discovery_netbox_inventory_device
 WHERE
+    status_value = 'active'
+    AND (
     primary_ip_address = %s
  OR primary_ip_address ILIKE %s
  OR "name" ILIKE %s
  OR location_name ILIKE %s
  OR site_name ILIKE %s
+    )
 ORDER BY collection_time DESC NULLS LAST
 LIMIT 20
 """,
@@ -615,6 +683,188 @@ LIMIT 20
         """Return Hyperconverged cluster average utilization: cpu_avg_pct, mem_avg_pct."""
         return self._run_row(cursor, vq.HYPERCONV_AVG30, (dc_wc, start_ts, end_ts))
 
+    # VM-level allocation: storage (provisioned/used) + CPU/RAM allocated via NetBox host GHz
+    _VMWARE_DEFAULT_GHZ_KEY = "vmware.default_host_cpu_ghz"
+
+    def _get_default_host_cpu_ghz(self) -> float:
+        """Read UI-configured fallback GHz from webui gui_crm_calc_config."""
+        default = DEFAULT_HOST_CPU_GHZ
+        webui = getattr(self, "_webui", None)
+        if webui is None or not getattr(webui, "is_available", False):
+            return default
+        try:
+            row = webui.run_one(
+                "SELECT config_value FROM gui_crm_calc_config WHERE config_key = %s",
+                (self._VMWARE_DEFAULT_GHZ_KEY,),
+            )
+            if row and row[0] is not None:
+                parsed = float(row[0])
+                if parsed > 0:
+                    return parsed
+        except Exception as exc:
+            logger.warning("Failed to read %s from webui: %s", self._VMWARE_DEFAULT_GHZ_KEY, exc)
+        return default
+
+    def _load_host_ghz_map(self, cursor) -> dict[str, float]:
+        def _loader():
+            return self._run_rows(cursor, vq.NETBOX_HOST_CPU_STRINGS)
+
+        return cached_host_map(_loader, default_ghz=self._get_default_host_cpu_ghz())
+
+    def _compute_vmware_vm_allocation(
+        self,
+        cursor,
+        dc_wc: str,
+        *,
+        classic_km: bool,
+        cluster_filter: list[str] | None = None,
+    ) -> dict:
+        """Aggregate VM-level CPU/RAM/storage allocation for KM or VMware hyperconv."""
+        clusters = cluster_filter or []
+        sql = vq.CLASSIC_VM_ALLOCATION_ROWS if classic_km else vq.HYPERCONV_VMWARE_VM_ALLOCATION_ROWS
+        rows = self._run_rows(cursor, sql, (dc_wc, clusters, clusters))
+        host_map = self._load_host_ghz_map(cursor)
+        return aggregate_vm_allocation(rows, host_map, default_ghz=self._get_default_host_cpu_ghz())
+
+    def get_classic_storage_vm(
+        self,
+        cursor,
+        dc_wc: str,
+        cluster_filter: list[str] | None = None,
+    ) -> dict:
+        return self._compute_vmware_vm_allocation(
+            cursor, dc_wc, classic_km=True, cluster_filter=cluster_filter
+        )
+
+    def _run_nutanix_vm_storage(
+        self,
+        cursor,
+        dc_code: str,
+        cluster_filter: list[str] | None = None,
+    ) -> tuple:
+        """Return (provisioned_gb, used_gb, vcpu_count, mem_alloc_gb) from Nutanix VM metrics."""
+        clusters = cluster_filter or []
+        if clusters:
+            row = self._run_row(cursor, nq.NUTANIX_VM_STORAGE_FILTERED, (dc_code, clusters))
+        else:
+            row = self._run_row(cursor, nq.NUTANIX_VM_STORAGE, (dc_code,))
+        return row or (0.0, 0.0, 0, 0.0)
+
+    def _compute_nutanix_vm_allocation(
+        self,
+        cursor,
+        dc_code: str,
+        cluster_filter: list[str] | None = None,
+    ) -> dict:
+        """Aggregate Nutanix VM allocation with host GHz from NetBox inventory."""
+        clusters = cluster_filter or []
+        if clusters:
+            rows = self._run_rows(cursor, nq.NUTANIX_VM_ALLOCATION_ROWS_FILTERED, (dc_code, clusters))
+        else:
+            rows = self._run_rows(cursor, nq.NUTANIX_VM_ALLOCATION_ROWS, (dc_code,))
+        host_map = self._load_host_ghz_map(cursor)
+        return aggregate_vm_allocation(rows, host_map, default_ghz=self._get_default_host_cpu_ghz())
+
+    def get_hyperconv_storage_vm(
+        self,
+        cursor,
+        dc_code: str,
+        cluster_filter: list[str] | None = None,
+    ) -> dict:
+        dc_wc = f"%{dc_code}%"
+        vmw = self._compute_vmware_vm_allocation(
+            cursor, dc_wc, classic_km=False, cluster_filter=cluster_filter
+        )
+        ntx = self._compute_nutanix_vm_allocation(cursor, dc_code, cluster_filter)
+        return {
+            "stor_provisioned_gb": round(
+                float(vmw.get("stor_provisioned_gb") or 0) + float(ntx.get("stor_provisioned_gb") or 0), 2
+            ),
+            "stor_actual_used_gb": round(
+                float(vmw.get("stor_actual_used_gb") or 0) + float(ntx.get("stor_actual_used_gb") or 0), 2
+            ),
+            "cpu_alloc_ghz_vm": round(
+                float(vmw.get("cpu_alloc_ghz_vm") or 0) + float(ntx.get("cpu_alloc_ghz_vm") or 0), 2
+            ),
+            "cpu_alloc_ghz_sales": round(
+                float(vmw.get("cpu_alloc_ghz_sales") or 0) + float(ntx.get("cpu_alloc_ghz_sales") or 0), 2
+            ),
+            "mem_alloc_gb_vm": round(
+                float(vmw.get("mem_alloc_gb_vm") or 0) + float(ntx.get("mem_alloc_gb_vm") or 0), 2
+            ),
+            "cpu_alloc_hosts_resolved": int(vmw.get("cpu_alloc_hosts_resolved") or 0)
+            + int(ntx.get("cpu_alloc_hosts_resolved") or 0),
+            "cpu_alloc_hosts_fallback_default": int(vmw.get("cpu_alloc_hosts_fallback_default") or 0)
+            + int(ntx.get("cpu_alloc_hosts_fallback_default") or 0),
+        }
+
+    @staticmethod
+    def _apply_cpu_overalloc_flags(section: dict) -> dict:
+        """Merge cpu_overallocated_* flags into a compute section dict."""
+        flags = compute_cpu_overalloc_flags(
+            section.get("cpu_cap", 0),
+            section.get("cpu_alloc_ghz_sales", 0),
+            section.get("cpu_alloc_ghz_vm", 0),
+        )
+        return {**section, **flags}
+
+    def _enrich_customer_vm_list(self, cursor, vm_list: list[dict]) -> list[dict]:
+        default_ghz = self._get_default_host_cpu_ghz()
+
+        def _loader():
+            return self._run_rows(cursor, NETBOX_HOST_CPU_STRINGS)
+
+        host_map = cached_host_map(_loader, default_ghz=default_ghz)
+        return enrich_customer_vm_cpu_list(vm_list, host_map, default_ghz=default_ghz)
+
+    # CRM unit prices (TL) per architecture — used to compute potential sellable revenue
+    _SELLABLE_PRODUCT_MAP = {
+        "klasik": {
+            "cpu":     "Klasik Mimari Intel CPU",
+            "ram":     "Klasik Mimari Intel RAM",
+            "storage": "Klasik Mimari Intel Disk - SSD",
+        },
+        "hyperconv": {
+            "cpu":     "Hyperconverged Mimari Intel CPU",
+            "ram":     "Hyperconverged Mimari Intel RAM",
+            "storage": "Hyperconverged Mimari Intel Disk - SSD",
+        },
+        # Power: yalnızca CPU fiyatlandırması. Birim CRM'de "core" geçse de 1 core = 1 GHz
+        # eşdeğeri kabul edilir; Power kaynağı core olduğu için satış hesabında 3.3 ile çarpılarak GHz'e dönüştürülür.
+        "power": {
+            "cpu": "SAP Power HANA CPU",
+        },
+    }
+
+    def get_unit_prices_tl(self, cursor, mimari: str) -> dict:
+        """Return {cpu_vcpu, ram_gb, storage_gb} TL unit prices for given architecture.
+        Power mapping yalnızca CPU içerir; eksik anahtarlar 0.0 döner."""
+        mapping = self._SELLABLE_PRODUCT_MAP.get(mimari.lower())
+        zero = {"cpu_vcpu": 0.0, "ram_gb": 0.0, "storage_gb": 0.0}
+        if not mapping:
+            return zero
+        names = [v for v in (mapping.get("cpu"), mapping.get("ram"), mapping.get("storage")) if v]
+        try:
+            rows = self._run_rows(cursor, """
+                SELECT p.name, ppl.amount
+                FROM discovery_crm_productpricelevels ppl
+                JOIN discovery_crm_products p ON p.productid = ppl.productid
+                JOIN discovery_crm_pricelevels pl ON pl.pricelevelid = ppl.pricelevelid
+                WHERE pl.name ILIKE '%%TL%%'
+                  AND pl.statecode = 0
+                  AND p.statecode  = 0
+                  AND p.name = ANY(%s::text[])
+            """, (names,))
+        except Exception as exc:
+            logger.warning("get_unit_prices_tl(%s) failed: %s", mimari, exc)
+            return zero
+        name_to_price = {r[0]: float(r[1] or 0) for r in (rows or [])}
+        return {
+            "cpu_vcpu":   round(name_to_price.get(mapping.get("cpu") or "", 0.0), 4),
+            "ram_gb":     round(name_to_price.get(mapping.get("ram") or "", 0.0), 4),
+            "storage_gb": round(name_to_price.get(mapping.get("storage") or "", 0.0), 4),
+        }
+
     # ------------------------------------------------------------------
     # Cluster list and filtered metrics (for DC view cluster selector)
     # ------------------------------------------------------------------
@@ -679,6 +929,8 @@ LIMIT 20
                     avg30 = self._run_row(
                         cur, vq.CLASSIC_AVG30_FILTERED, (dc_wc, selected_clusters, start_ts, end_ts)
                     )
+                    storage_vm = self.get_classic_storage_vm(cur, dc_wc, selected_clusters)
+                    unit_prices = self.get_unit_prices_tl(cur, "klasik")
         except OperationalError as exc:
             logger.error("DB unavailable for get_classic_metrics_filtered(%s): %s", dc_code, exc)
             return _empty_compute_section()
@@ -695,11 +947,15 @@ LIMIT 20
         cl_stor_used = round(float(row[7] or 0) / 1024.0, 3)
         cl_cpu_pct = round(float(avg30[0] or 0), 1)
         cl_mem_pct = round(float(avg30[1] or 0), 1)
+        if cl_cpu_pct == 0.0 and cl_cpu_cap > 0:
+            cl_cpu_pct = round(100.0 * cl_cpu_used / cl_cpu_cap, 1)
+        if cl_mem_pct == 0.0 and cl_mem_cap > 0:
+            cl_mem_pct = round(100.0 * cl_mem_used / cl_mem_cap, 1)
         cl_cpu_pct_max = round(float(avg30[2] or 0), 1)
         cl_mem_pct_max = round(float(avg30[3] or 0), 1)
         cl_cpu_pct_min = round(float(avg30[4] or 0), 1)
         cl_mem_pct_min = round(float(avg30[5] or 0), 1)
-        return {
+        return self._apply_cpu_overalloc_flags({
             "hosts": cl_hosts,
             "vms": cl_vms,
             "cpu_cap": cl_cpu_cap,
@@ -707,14 +963,21 @@ LIMIT 20
             "cpu_pct": cl_cpu_pct,
             "cpu_pct_max": cl_cpu_pct_max,
             "cpu_pct_min": cl_cpu_pct_min,
+            "cpu_util_pct": cl_cpu_pct,
+            "cpu_util_pct_max": cl_cpu_pct_max,
             "mem_cap": cl_mem_cap,
             "mem_used": cl_mem_used,
             "mem_pct": cl_mem_pct,
             "mem_pct_max": cl_mem_pct_max,
             "mem_pct_min": cl_mem_pct_min,
+            "mem_util_pct": cl_mem_pct,
+            "mem_util_pct_max": cl_mem_pct_max,
             "stor_cap": cl_stor_cap,
             "stor_used": cl_stor_used,
-        }
+            **storage_vm,
+            "unit_prices": unit_prices,
+            "sellable_multiplier": 3.3,
+        })
 
     def get_hyperconv_metrics_filtered(
         self, dc_code: str, selected_clusters: list[str] | None, time_range: dict | None = None
@@ -739,6 +1002,8 @@ LIMIT 20
                     hc_avg30 = self._run_row(
                         cur, vq.HYPERCONV_AVG30_FILTERED, (dc_wc, selected_clusters, start_ts, end_ts)
                     )
+                    storage_vm = self.get_hyperconv_storage_vm(cur, dc_code, selected_clusters)
+                    unit_prices = self.get_unit_prices_tl(cur, "hyperconv")
         except OperationalError as exc:
             logger.error("DB unavailable for get_hyperconv_metrics_filtered(%s): %s", dc_code, exc)
             return _empty_compute_section()
@@ -779,7 +1044,7 @@ LIMIT 20
             hc_cpu_pct = hc_cpu_pct_cap
         if hc_mem_pct_max <= 0 and hc_mem_pct_cap > 0:
             hc_mem_pct = hc_mem_pct_cap
-        return {
+        return self._apply_cpu_overalloc_flags({
             "hosts": hc_hosts,
             "vms": hc_vms,
             "cpu_cap": hc_cpu_cap,
@@ -787,45 +1052,21 @@ LIMIT 20
             "cpu_pct": hc_cpu_pct,
             "cpu_pct_max": hc_cpu_pct_max,
             "cpu_pct_min": hc_cpu_pct_min,
+            "cpu_util_pct": hc_cpu_pct,
+            "cpu_util_pct_max": hc_cpu_pct_max if hc_cpu_pct_max > 0 else hc_cpu_pct_cap,
             "mem_cap": hc_mem_cap,
             "mem_used": hc_mem_used,
             "mem_pct": hc_mem_pct,
             "mem_pct_max": hc_mem_pct_max,
             "mem_pct_min": hc_mem_pct_min,
+            "mem_util_pct": hc_mem_pct,
+            "mem_util_pct_max": hc_mem_pct_max if hc_mem_pct_max > 0 else hc_mem_pct_cap,
             "stor_cap": hc_stor_cap,
             "stor_used": hc_stor_used,
-        }
-
-    def get_power_metrics_filtered(
-        self,
-        dc_code: str,
-        selected_clusters: list[str] | None,
-        time_range: dict | None = None,
-    ) -> dict:
-        """IBM Power metrics in the same shape as classic/hyperconv compute endpoints."""
-        _ = selected_clusters
-        full = self.get_dc_details(dc_code, time_range)
-        p = full.get("power") or {}
-        cu = float(p.get("cpu_used") or 0)
-        ca = float(p.get("cpu_assigned") or 0)
-        mt = float(p.get("memory_total") or 0)
-        ma = float(p.get("memory_assigned") or 0)
-        sc = float(p.get("storage_cap_tb") or 0)
-        su = float(p.get("storage_used_tb") or 0)
-        cpu_cap = max(cu, ca)
-        cpu_used = ca
-        if cpu_cap < cpu_used:
-            cpu_cap = cpu_used
-        return {
-            "hosts": int(p.get("hosts") or 0),
-            "vms": int(p.get("vms") or 0),
-            "cpu_cap": round(cpu_cap, 4),
-            "cpu_used": round(cpu_used, 4),
-            "mem_cap": round(mt, 4),
-            "mem_used": round(ma, 4),
-            "stor_cap": round(sc, 6),
-            "stor_used": round(su, 6),
-        }
+            **storage_vm,
+            "unit_prices": unit_prices,
+            "sellable_multiplier": 3.3,
+        })
 
     # ------------------------------------------------------------------
     # Unit normalization & aggregation (shared by single + batch paths)
@@ -872,6 +1113,12 @@ LIMIT 20
         classic_avg30=None,
         hyperconv_row=None,
         hyperconv_avg30=None,
+        classic_storage_vm=None,
+        hyperconv_storage_vm=None,
+        classic_unit_prices=None,
+        hyperconv_unit_prices=None,
+        power_unit_prices=None,
+        sellable_multiplier: float = 3.3,
         dc_description: str = "",
     ) -> dict:
         """Apply unit normalization and build the standard DC detail dictionary.
@@ -888,8 +1135,8 @@ LIMIT 20
         vmware_mem      = vmware_mem      or (0, 0)
         vmware_storage  = vmware_storage  or (0, 0)
         vmware_cpu      = vmware_cpu      or (0, 0)
-        power_mem       = power_mem       or (0, 0)
-        power_cpu       = power_cpu       or (0, 0, 0)
+        power_mem       = power_mem       or (0, 0, 0)
+        power_cpu       = power_cpu       or (0, 0, 0, 0)
         classic_row     = classic_row     or (0,) * 8
         classic_avg30   = DatabaseService._normalize_avg30_row(classic_avg30)
         hyperconv_row   = hyperconv_row   or (0,) * 8
@@ -965,6 +1212,47 @@ LIMIT 20
         hc_stor_used = round(n_stor_used_tb, 3)
 
         desc = (dc_description or "").strip()
+        _vm_alloc_defaults = {
+            "stor_provisioned_gb": 0.0,
+            "stor_actual_used_gb": 0.0,
+            "cpu_alloc_ghz_vm": 0.0,
+            "cpu_alloc_ghz_sales": 0.0,
+            "mem_alloc_gb_vm": 0.0,
+        }
+        classic_section = DatabaseService._apply_cpu_overalloc_flags({
+            "hosts": cl_hosts, "vms": cl_vms,
+            "cpu_cap": cl_cpu_cap, "cpu_used": cl_cpu_used, "cpu_pct": cl_cpu_pct,
+            "cpu_pct_max": cl_cpu_pct_max,
+            "cpu_pct_min": cl_cpu_pct_min,
+            "cpu_util_pct": cl_cpu_pct,
+            "cpu_util_pct_max": cl_cpu_pct_max,
+            "mem_cap": cl_mem_cap, "mem_used": cl_mem_used, "mem_pct": cl_mem_pct,
+            "mem_pct_max": cl_mem_pct_max,
+            "mem_pct_min": cl_mem_pct_min,
+            "mem_util_pct": cl_mem_pct,
+            "mem_util_pct_max": cl_mem_pct_max,
+            "stor_cap": cl_stor_cap, "stor_used": cl_stor_used,
+            **(classic_storage_vm or _vm_alloc_defaults),
+            "unit_prices": classic_unit_prices or {"cpu_vcpu": 0.0, "ram_gb": 0.0, "storage_gb": 0.0},
+            "sellable_multiplier": sellable_multiplier,
+        })
+        hyperconv_section = DatabaseService._apply_cpu_overalloc_flags({
+            "hosts": hc_hosts, "vms": hc_vms,
+            "cpu_cap": hc_cpu_cap, "cpu_used": hc_cpu_used, "cpu_pct": hc_cpu_pct,
+            "cpu_pct_max": hc_cpu_pct_max,
+            "cpu_pct_min": hc_cpu_pct_min,
+            "cpu_util_pct": hc_cpu_pct,
+            "cpu_util_pct_max": hc_cpu_pct_max,
+            "mem_cap": hc_mem_cap, "mem_used": hc_mem_used, "mem_pct": hc_mem_pct,
+            "mem_pct_max": hc_mem_pct_max,
+            "mem_pct_min": hc_mem_pct_min,
+            "mem_util_pct": hc_mem_pct,
+            "mem_util_pct_max": hc_mem_pct_max,
+            "stor_cap": hc_stor_cap, "stor_used": hc_stor_used,
+            **(hyperconv_storage_vm or _vm_alloc_defaults),
+            "unit_prices": hyperconv_unit_prices or {"cpu_vcpu": 0.0, "ram_gb": 0.0, "storage_gb": 0.0},
+            "sellable_multiplier": sellable_multiplier,
+        })
         return {
             "meta": {
                 "name": dc_code,
@@ -972,26 +1260,8 @@ LIMIT 20
                 "description": desc,
             },
             # Compute-type split (new) — used by dc_view tabs
-            "classic": {
-                "hosts": cl_hosts, "vms": cl_vms,
-                "cpu_cap": cl_cpu_cap, "cpu_used": cl_cpu_used, "cpu_pct": cl_cpu_pct,
-                "cpu_pct_max": cl_cpu_pct_max,
-                "cpu_pct_min": cl_cpu_pct_min,
-                "mem_cap": cl_mem_cap, "mem_used": cl_mem_used, "mem_pct": cl_mem_pct,
-                "mem_pct_max": cl_mem_pct_max,
-                "mem_pct_min": cl_mem_pct_min,
-                "stor_cap": cl_stor_cap, "stor_used": cl_stor_used,
-            },
-            "hyperconv": {
-                "hosts": hc_hosts, "vms": hc_vms,
-                "cpu_cap": hc_cpu_cap, "cpu_used": hc_cpu_used, "cpu_pct": hc_cpu_pct,
-                "cpu_pct_max": hc_cpu_pct_max,
-                "cpu_pct_min": hc_cpu_pct_min,
-                "mem_cap": hc_mem_cap, "mem_used": hc_mem_used, "mem_pct": hc_mem_pct,
-                "mem_pct_max": hc_mem_pct_max,
-                "mem_pct_min": hc_mem_pct_min,
-                "stor_cap": hc_stor_cap, "stor_used": hc_stor_used,
-            },
+            "classic": classic_section,
+            "hyperconv": hyperconv_section,
             # Legacy combined Intel section — kept for home.py / datacenters.py
             # VM count uses cluster-level dedup: Classic (KM) VMs from VMware cluster_metrics
             # + all Nutanix VMs (covers Nutanix-only and VMware-managed Nutanix VMs once each).
@@ -1013,12 +1283,19 @@ LIMIT 20
                 "vms": int(power_lpar_count or 0),
                 "vios": int(power_vios or 0),
                 "lpar_count": int(power_lpar_count or 0),
-                "cpu_used": round(float(power_cpu[0] or 0), 2),
-                "cpu_assigned": round(float(power_cpu[2] or 0), 2),
-                "memory_total": round(float(power_mem[0] or 0), 2),
-                "memory_assigned": round(float(power_mem[1] or 0), 2),
+                "cpu_total_procunits": round(float(power_cpu[0] or 0), 2),
+                "cpu_total_cores": round(float(power_cpu[0] or 0) * 8.0, 2),
+                "cpu_available_procunits": round(float(power_cpu[1] or 0), 2),
+                "cpu_available_cores": round(float(power_cpu[1] or 0) * 8.0, 2),
+                "cpu_used": round(float(power_cpu[2] or 0), 2),
+                "cpu_assigned": round(float(power_cpu[3] or 0), 2),
+                "memory_total": round(float(power_mem[0] or 0) / 1024.0, 2),
+                "memory_available": round(float(power_mem[1] or 0) / 1024.0, 2),
+                "memory_assigned": round(float(power_mem[2] or 0) / 1024.0, 2),
                 "storage_cap_tb": round(float((power_storage or (0.0, 0.0))[0]), 3),
                 "storage_used_tb": round(float((power_storage or (0.0, 0.0))[1]), 3),
+                "unit_prices": power_unit_prices or {"cpu_vcpu": 0.0, "ram_gb": 0.0, "storage_gb": 0.0},
+                "sellable_multiplier": sellable_multiplier,
             },
             "energy": {
                 "total_kw": round(total_energy_kw, 2),
@@ -1057,19 +1334,26 @@ WHERE UPPER(s.name) LIKE UPPER(%s) OR UPPER(s.location) LIKE UPPER(%s)
 """
         rows = self._run_rows(cursor, sql, (pattern, pattern))
         cap_tb, used_tb = 0.0, 0.0
+        def parse_capacity(val: str) -> float:
+            if not val:
+                return 0.0
+            val = str(val).upper().strip()
+            try:
+                num = float(''.join(c for c in val if c.isdigit() or c == '.'))
+                if 'GB' in val:
+                    return num / 1024.0
+                if 'MB' in val:
+                    return num / (1024.0**2)
+                if 'PB' in val:
+                    return num * 1024.0
+                return num
+            except Exception:
+                return 0.0
+
         for row in rows:
-            if not row or len(row) < 2: continue
+            if not row or len(row) < 2:
+                continue
             cap_str, used_str = row
-            def parse_capacity(val: str) -> float:
-                if not val: return 0.0
-                val = str(val).upper().strip()
-                try:
-                    num = float(''.join(c for c in val if c.isdigit() or c == '.'))
-                    if 'GB' in val: return num / 1024.0
-                    if 'MB' in val: return num / (1024.0**2)
-                    if 'PB' in val: return num * 1024.0
-                    return num
-                except Exception: return 0.0
             cap_tb += parse_capacity(cap_str)
             used_tb += parse_capacity(used_str)
         return (cap_tb, used_tb)
@@ -1077,18 +1361,20 @@ WHERE UPPER(s.name) LIKE UPPER(%s) OR UPPER(s.location) LIKE UPPER(%s)
     def get_dc_details(self, dc_code: str, time_range: dict | None = None) -> dict:
         """Return full metrics dict for a single data center. Result is TTL-cached per time range."""
         tr = time_range or default_time_range()
+        if tr.get("anchor_latest"):
+            tr = self._smart_1h_tr(tr)
         start_ts, end_ts = time_range_to_bounds(tr)
         cache_key = f"dc_details:{dc_code}:{tr.get('start','')}:{tr.get('end','')}"
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
 
-        try:
+        def _fetch():
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     self._ensure_dc_description_map(cur)
                     dc_wc = f"%{dc_code}%"
-                    result = self._aggregate_dc(
+                    return self._aggregate_dc(
                         dc_code,
                         dc_description=self._dc_description_map.get(dc_code, ""),
                         nutanix_host_count=self.get_nutanix_host_count(cur, dc_code, start_ts, end_ts),
@@ -1115,13 +1401,19 @@ WHERE UPPER(s.name) LIKE UPPER(%s) OR UPPER(s.location) LIKE UPPER(%s)
                         classic_avg30=self.get_classic_avg30(cur, dc_wc, start_ts, end_ts),
                         hyperconv_row=self.get_hyperconv_metrics(cur, dc_wc, start_ts, end_ts),
                         hyperconv_avg30=self.get_hyperconv_avg30(cur, dc_wc, start_ts, end_ts),
+                        classic_storage_vm=self.get_classic_storage_vm(cur, dc_wc),
+                        hyperconv_storage_vm=self.get_hyperconv_storage_vm(cur, dc_code),
+                        classic_unit_prices=self.get_unit_prices_tl(cur, "klasik"),
+                        hyperconv_unit_prices=self.get_unit_prices_tl(cur, "hyperconv"),
+                        power_unit_prices=self.get_unit_prices_tl(cur, "power"),
                     )
+
+        try:
+            result = cache.run_singleflight(cache_key, _fetch)
+            return result
         except OperationalError as exc:
             logger.error("DB unavailable for get_dc_details(%s): %s", dc_code, exc)
             return _EMPTY_DC(dc_code)
-
-        cache.set(cache_key, result)
-        return result
 
     # ------------------------------------------------------------------
     # Batch fetch (internal) — used by get_all_datacenters_summary
@@ -1248,9 +1540,9 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
                 ibm_lpar.setdefault(dc, set()).add(row[1])  # type: ignore[arg-type]
         ibm_lpar = {dc: len(names) for dc, names in ibm_lpar.items()}  # type: ignore[assignment]
 
-        ibm_mem_hosts: dict[str, dict[str, list[tuple[float, float, object]]]] = {}
+        ibm_mem_hosts: dict[str, dict[str, list[tuple[float, float, float, object]]]] = {}
         for row in ibm_raw["ibm_mem_raw"]:
-            if not row or len(row) < 4:
+            if not row or len(row) < 5:
                 continue
             server_name = row[0]
             dc = _extract_dc(server_name)
@@ -1258,57 +1550,85 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
                 continue
             try:
                 total_mem = float(row[1] or 0)
-                assigned_mem = float(row[2] or 0)
+                avail_mem = float(row[2] or 0)
+                assigned_mem = float(row[3] or 0)
             except (TypeError, ValueError):
                 continue
-            ts = row[3]
+            ts = row[4]
             dc_hosts = ibm_mem_hosts.setdefault(dc, {})
-            dc_hosts.setdefault(server_name, []).append((total_mem, assigned_mem, ts))
+            dc_hosts.setdefault(server_name, []).append((total_mem, avail_mem, assigned_mem, ts))
 
         ibm_mem: dict[str, tuple] = {}
         for dc, hosts in ibm_mem_hosts.items():
-            total_cfg = 0.0
-            total_assigned = 0.0
+            total_mb = 0.0
+            avail_mb = 0.0
+            assigned_mb = 0.0
             for server_name, samples in hosts.items():
                 if not samples:
                     continue
-                latest_total, latest_assigned, _ = max(samples, key=lambda v: v[2])
-                total_cfg += latest_total
-                total_assigned += latest_assigned
-            # HMC bellek metrikleri MB cinsinden geldiği için burada GB'e çeviriyoruz.
-            ibm_mem[dc] = (
-                total_cfg / 1024.0,
-                total_assigned / 1024.0,
-            )
+                latest_total, latest_avail, latest_assigned, _ = max(samples, key=lambda v: v[3])
+                total_mb += latest_total
+                avail_mb += latest_avail
+                assigned_mb += latest_assigned
+            # Raw MB per DC; _aggregate_dc converts to GB for API consumers.
+            ibm_mem[dc] = (total_mb, avail_mb, assigned_mb)
 
-        ibm_cpu_acc: dict[str, list] = {}
+        ibm_cpu_hosts: dict[str, dict[str, list[tuple[float, float, float, float, object]]]] = {}
         for row in ibm_raw["ibm_cpu_raw"]:
-            if not row or len(row) < 4:
+            if not row or len(row) < 6:
                 continue
-            dc = _extract_dc(row[0])
-            if dc:
-                ibm_cpu_acc.setdefault(dc, []).append(
-                    (float(row[1] or 0), float(row[2] or 0), float(row[3] or 0))
-                )
+            server_name = row[0]
+            dc = _extract_dc(server_name)
+            if not dc:
+                continue
+            try:
+                tot_p = float(row[1] or 0)
+                avail_p = float(row[2] or 0)
+                used_p = float(row[3] or 0)
+                assigned_p = float(row[4] or 0)
+            except (TypeError, ValueError):
+                continue
+            ts = row[5]
+            dc_hosts = ibm_cpu_hosts.setdefault(dc, {})
+            dc_hosts.setdefault(server_name, []).append((tot_p, avail_p, used_p, assigned_p, ts))
+
         ibm_cpu_map: dict[str, tuple] = {}
-        for dc, vals in ibm_cpu_acc.items():
-            n_vals = len(vals)
+        for dc, hosts in ibm_cpu_hosts.items():
+            sum_tot = sum_avail = 0.0
+            used_vals: list[float] = []
+            assigned_vals: list[float] = []
+            for _sn, samples in hosts.items():
+                if not samples:
+                    continue
+                tpu, apu, u, a, _ts = max(samples, key=lambda v: v[4])
+                sum_tot += tpu
+                sum_avail += apu
+                used_vals.append(u)
+                assigned_vals.append(a)
+            nu = len(used_vals) or 1
+            na = len(assigned_vals) or 1
             ibm_cpu_map[dc] = (
-                sum(v[0] for v in vals) / n_vals,
-                sum(v[1] for v in vals) / n_vals,
-                sum(v[2] for v in vals) / n_vals,
+                sum_tot,
+                sum_avail,
+                sum(used_vals) / nu,
+                sum(assigned_vals) / na,
             )
 
         def _parse_capacity(val: str) -> float:
-            if not val: return 0.0
+            if not val:
+                return 0.0
             val = str(val).upper().strip()
             try:
                 num = float(''.join(c for c in val if c.isdigit() or c == '.'))
-                if 'GB' in val: return num / 1024.0
-                if 'MB' in val: return num / (1024.0**2)
-                if 'PB' in val: return num * 1024.0
+                if 'GB' in val:
+                    return num / 1024.0
+                if 'MB' in val:
+                    return num / (1024.0**2)
+                if 'PB' in val:
+                    return num * 1024.0
                 return num
-            except Exception: return 0.0
+            except Exception:
+                return 0.0
 
 
         # ---- Map batch rows back to DC codes ----
@@ -1330,14 +1650,14 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
 
         ibm_storage_tb: dict[str, tuple[float, float]] = {}
         for row in ibm_raw.get("ibm_storage_raw", []):
-            if not row or len(row) < 4: continue
+            if not row or len(row) < 4:
+                continue
             name_val, loc_val, cap_str, used_str = row
             dc = _extract_dc(f"{name_val or ''} {loc_val or ''}")
             if not dc:
                 dc = _canonical_dc(name_val)
             if not dc:
                 dc = _canonical_dc(loc_val)
-                
             if dc:
                 cap_tb = _parse_capacity(cap_str)
                 used_tb = _parse_capacity(used_str)
@@ -1410,6 +1730,18 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
             for dc in dc_list
         }
 
+        # Fetch CRM unit prices once for all archs — these are global, not per-DC.
+        # Required so the dc_details cache populated by this batch path includes Power TL.
+        try:
+            with self._get_connection() as _up_conn:
+                with _up_conn.cursor() as _up_cur:
+                    classic_up   = self.get_unit_prices_tl(_up_cur, "klasik")
+                    hyperconv_up = self.get_unit_prices_tl(_up_cur, "hyperconv")
+                    power_up     = self.get_unit_prices_tl(_up_cur, "power")
+        except Exception as _exc:
+            logger.warning("Batch unit_prices fetch failed: %s", _exc)
+            classic_up = hyperconv_up = power_up = None
+
         # ---- Build per-DC aggregate dicts ----
         results: dict[str, dict] = {}
         for dc in dc_list:
@@ -1422,8 +1754,8 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
             vm_row   = v_mem_m.get(dc)
             vs_row   = v_stor.get(dc)
             vcpu_row = v_cpu.get(dc)
-            power_mem_tup = ibm_mem.get(dc, (0.0, 0.0))
-            power_cpu_tup = ibm_cpu_map.get(dc, (0.0, 0.0, 0.0))
+            power_mem_tup = ibm_mem.get(dc, (0.0, 0.0, 0.0))
+            power_cpu_tup = ibm_cpu_map.get(dc, (0.0, 0.0, 0.0, 0.0))
 
             # Classic / Hyperconverged rows from cluster_metrics
             vcl_row  = v_classic.get(dc)
@@ -1519,8 +1851,28 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
                 classic_avg30=cl_avg,
                 hyperconv_row=hc_data,
                 hyperconv_avg30=hc_avg,
+                classic_unit_prices=classic_up,
+                hyperconv_unit_prices=hyperconv_up,
+                power_unit_prices=power_up,
                 dc_description=self._dc_description_map.get(dc, ""),
             )
+
+        # VM-level allocation (storage + CPU/RAM) is not batched; enrich per DC.
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    for dc in dc_list:
+                        dc_wc = f"%{dc}%"
+                        if dc not in results:
+                            continue
+                        classic_vm = self.get_classic_storage_vm(cur, dc_wc)
+                        hyper_vm = self.get_hyperconv_storage_vm(cur, dc)
+                        results[dc]["classic"].update(classic_vm)
+                        results[dc]["hyperconv"].update(hyper_vm)
+                        results[dc]["classic"] = self._apply_cpu_overalloc_flags(results[dc]["classic"])
+                        results[dc]["hyperconv"] = self._apply_cpu_overalloc_flags(results[dc]["hyperconv"])
+        except OperationalError as exc:
+            logger.warning("Batch VM allocation enrichment failed: %s", exc)
 
         return results, platform_counts
 
@@ -1535,12 +1887,15 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
         Result is TTL-cached per time range.
         """
         tr = time_range or default_time_range()
+        if tr.get("anchor_latest"):
+            tr = self._smart_1h_tr(tr)
         cache_key = f"all_dc_summary:{tr.get('start','')}:{tr.get('end','')}"
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
 
-        return self._rebuild_summary(tr)
+        result = cache.run_singleflight(cache_key, lambda: self._rebuild_summary(tr))
+        return result
 
     def _rebuild_summary(self, time_range: dict | None = None) -> list[dict]:
         """Fetch fresh data and rebuild the summary list. Also populates per-DC cache for the given time range."""
@@ -1722,7 +2077,17 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
         # Architecture-specific totals for home Resource Usage tabs
         classic_totals = {"cpu_cap": 0.0, "cpu_used": 0.0, "mem_cap": 0.0, "mem_used": 0.0, "stor_cap": 0.0, "stor_used": 0.0}
         hyperconv_totals = {"cpu_cap": 0.0, "cpu_used": 0.0, "mem_cap": 0.0, "mem_used": 0.0, "stor_cap": 0.0, "stor_used": 0.0}
-        ibm_totals = {"mem_total": 0.0, "mem_assigned": 0.0, "cpu_used": 0.0, "cpu_assigned": 0.0, "stor_cap": 0.0, "stor_used": 0.0}
+        ibm_totals = {
+            "mem_total": 0.0,
+            "mem_available": 0.0,
+            "mem_assigned": 0.0,
+            "cpu_total_procunits": 0.0,
+            "cpu_available_procunits": 0.0,
+            "cpu_used": 0.0,
+            "cpu_assigned": 0.0,
+            "stor_cap": 0.0,
+            "stor_used": 0.0,
+        }
         for d in all_dc_data.values():
             c = d.get("classic", {})
             classic_totals["cpu_cap"] += float(c.get("cpu_cap", 0) or 0)
@@ -1740,7 +2105,10 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
             hyperconv_totals["stor_used"] += float(h.get("stor_used", 0) or 0)
             pw = d.get("power", {})
             ibm_totals["mem_total"] += float(pw.get("memory_total", 0) or 0)
+            ibm_totals["mem_available"] += float(pw.get("memory_available", 0) or 0)
             ibm_totals["mem_assigned"] += float(pw.get("memory_assigned", 0) or 0)
+            ibm_totals["cpu_total_procunits"] += float(pw.get("cpu_total_procunits", 0) or 0)
+            ibm_totals["cpu_available_procunits"] += float(pw.get("cpu_available_procunits", 0) or 0)
             ibm_totals["cpu_used"] += float(pw.get("cpu_used", 0) or 0)
             ibm_totals["cpu_assigned"] += float(pw.get("cpu_assigned", 0) or 0)
             ibm_totals["stor_cap"] += float(pw.get("storage_cap_tb", 0) or 0)
@@ -1753,7 +2121,10 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
             tot["stor_cap"] = round(tot["stor_cap"], 2)
             tot["stor_used"] = round(tot["stor_used"], 2)
         ibm_totals["mem_total"] = round(ibm_totals["mem_total"], 2)
+        ibm_totals["mem_available"] = round(ibm_totals["mem_available"], 2)
         ibm_totals["mem_assigned"] = round(ibm_totals["mem_assigned"], 2)
+        ibm_totals["cpu_total_procunits"] = round(ibm_totals["cpu_total_procunits"], 2)
+        ibm_totals["cpu_available_procunits"] = round(ibm_totals["cpu_available_procunits"], 2)
         ibm_totals["cpu_used"] = round(ibm_totals["cpu_used"], 2)
         ibm_totals["cpu_assigned"] = round(ibm_totals["cpu_assigned"], 2)
         ibm_totals["stor_cap"] = round(ibm_totals["stor_cap"], 2)
@@ -1787,6 +2158,8 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
     def get_global_overview(self, time_range: dict | None = None) -> dict:
         """Return global totals for the given time range. Derived from get_all_datacenters_summary (cached)."""
         tr = time_range or default_time_range()
+        if tr.get("anchor_latest"):
+            tr = self._smart_1h_tr(tr)
         cache_key = f"global_overview:{tr.get('start','')}:{tr.get('end','')}"
         cached_val = cache.get(cache_key)
         if cached_val is not None:
@@ -1803,16 +2176,98 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
         cache.set(cache_key, result)
         return result
 
+    def _get_latest_data_ts(self) -> datetime | None:
+        """Most-recent timestamp in vm_metrics. Cached 60 s.
+
+        Used to anchor the "1H" preset to actual data instead of wall-clock —
+        a strict last-60-minutes window often misses the next ingestion cycle
+        and renders empty even when data is fresh.
+        """
+        cached = cache.get("latest_vm_ts")
+        if cached:
+            try:
+                return datetime.fromisoformat(str(cached).replace("Z", "+00:00"))
+            except Exception:
+                pass
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute('SELECT MAX("timestamp") FROM public.vm_metrics')
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        ts = row[0]
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        cache.set("latest_vm_ts", ts.isoformat(), ttl=60)
+                        return ts
+        except Exception as exc:
+            logger.warning("latest vm_metrics timestamp lookup failed: %s", exc)
+        return None
+
+    _RELATIVE_PRESET_OFFSETS = {
+        "1h": timedelta(hours=1),
+        "1d": timedelta(days=1),
+        "7d": timedelta(days=7),
+        "30d": timedelta(days=30),
+        "1m": timedelta(days=30),
+        "2m": timedelta(days=60),
+        "3m": timedelta(days=90),
+        "6m": timedelta(days=180),
+    }
+
+    def _smart_1h_tr(self, tr: dict | None) -> dict:
+        """Anchor every relative preset (1h/1d/7d/30d/1m/2m/3m/6m) to the most
+        recent ingested timestamp instead of wall-clock. Without this, a window
+        like "last 7 days" returns nothing whenever ingestion is more than a
+        couple of days behind real time — which is exactly what was happening
+        when the customer reported '1H' (and then 7D) showing all zeros."""
+        if not tr:
+            return default_time_range()
+        preset = tr.get("preset")
+        offset = self._RELATIVE_PRESET_OFFSETS.get(preset)
+        if offset is None:  # custom or unknown preset → pass through
+            return tr
+        latest = self._get_latest_data_ts()
+        if not latest:
+            return tr
+        end = latest
+        start = end - offset
+        if preset == "1h":
+            return {
+                "start": start.strftime("%Y-%m-%dT%H:%M:%S") + "Z",
+                "end": end.strftime("%Y-%m-%dT%H:%M:%S") + "Z",
+                "preset": preset,
+            }
+        # Day-precision presets keep date-only strings so downstream SQL
+        # `BETWEEN 00:00:00 AND 23:59:59` expansion still applies.
+        return {
+            "start": start.date().isoformat(),
+            "end": end.date().isoformat(),
+            "preset": preset,
+        }
+
     def get_global_dashboard(self, time_range: dict | None = None) -> dict:
         """Return global overview + platform breakdown for the given time range."""
         tr = time_range or default_time_range()
+        if tr.get("anchor_latest"):
+            tr = self._smart_1h_tr(tr)
         range_suffix = f"{tr.get('start','')}:{tr.get('end','')}"
         cached = cache.get(f"global_dashboard:{range_suffix}")
         if cached is not None:
             return cached
         self.get_all_datacenters_summary(tr)
         empty_totals = {"cpu_cap": 0.0, "cpu_used": 0.0, "mem_cap": 0.0, "mem_used": 0.0, "stor_cap": 0.0, "stor_used": 0.0}
-        empty_ibm = {"mem_total": 0.0, "mem_assigned": 0.0, "cpu_used": 0.0, "cpu_assigned": 0.0, "stor_cap": 0.0, "stor_used": 0.0}
+        empty_ibm = {
+            "mem_total": 0.0,
+            "mem_available": 0.0,
+            "mem_assigned": 0.0,
+            "cpu_total_procunits": 0.0,
+            "cpu_available_procunits": 0.0,
+            "cpu_used": 0.0,
+            "cpu_assigned": 0.0,
+            "stor_cap": 0.0,
+            "stor_used": 0.0,
+        }
         return cache.get(f"global_dashboard:{range_suffix}") or {
             "overview": self.get_global_overview(tr),
             "platforms": {"nutanix": {"hosts": 0, "vms": 0}, "vmware": {"clusters": 0, "hosts": 0, "vms": 0}, "ibm": {"hosts": 0, "vios": 0, "lpars": 0}},
@@ -1832,7 +2287,7 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
         - Backup (Veeam/Zerto/storage) summary metrics
         """
         tr = time_range or default_time_range()
-        cache_key = f"customer_assets:{customer_name}:{tr.get('start','')}:{tr.get('end','')}"
+        cache_key = customer_assets_cache_key(customer_name, tr.get("start", ""), tr.get("end", ""))
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
@@ -1923,13 +2378,15 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
                     )
                     classic_vm_list = [
                         {
-                            "name": r[0], "source": r[1], "cluster": r[2],
-                            "cpu": float(r[3] or 0.0),
-                            "memory_gb": float(r[4] or 0.0),
-                            "disk_gb": float(r[5] or 0.0),
+                            "name": r[0], "source": r[1], "cluster": r[2], "vmhost": r[3],
+                            "cpu": float(r[4] or 0.0),
+                            "memory_gb": float(r[5] or 0.0),
+                            "disk_gb": float(r[6] or 0.0),
                         }
                         for r in (classic_vm_rows or []) if r and r[0]
                     ]
+                    classic_vm_list = self._enrich_customer_vm_list(cur, classic_vm_list)
+                    classic_cpu_real = sum_cpu_real_total(classic_vm_list)
 
                     # --- Hyperconverged Compute (non-KM VMware + Nutanix) ---
                     hc_count_row = self._run_row(
@@ -1954,13 +2411,15 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
                     )
                     hc_vm_list = [
                         {
-                            "name": r[0], "source": r[1], "cluster": r[2],
-                            "cpu": float(r[3] or 0.0),
-                            "memory_gb": float(r[4] or 0.0),
-                            "disk_gb": float(r[5] or 0.0),
+                            "name": r[0], "source": r[1], "cluster": r[2], "vmhost": r[3],
+                            "cpu": float(r[4] or 0.0),
+                            "memory_gb": float(r[5] or 0.0),
+                            "disk_gb": float(r[6] or 0.0),
                         }
                         for r in (hc_vm_rows or []) if r and r[0]
                     ]
+                    hc_vm_list = self._enrich_customer_vm_list(cur, hc_vm_list)
+                    hc_cpu_real = sum_cpu_real_total(hc_vm_list)
 
                     # Power / HANA (IBM LPAR)
                     power_cpu = float(
@@ -2067,7 +2526,10 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
 
         except (OperationalError, PoolError) as exc:
             logger.warning("get_customer_resources failed: %s", exc)
-            _empty_compute = {"vm_count": 0, "cpu_total": 0.0, "memory_gb": 0.0, "disk_gb": 0.0, "vm_list": []}
+            _empty_compute = {
+                "vm_count": 0, "cpu_total": 0.0, "cpu_real_total": 0.0,
+                "memory_gb": 0.0, "disk_gb": 0.0, "vm_list": [],
+            }
             return {
                 "totals": {
                     "vms_total": 0,
@@ -2153,6 +2615,7 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
             "classic": {
                 "vm_count": classic_vm_count,
                 "cpu_total": classic_cpu,
+                "cpu_real_total": classic_cpu_real,
                 "memory_gb": classic_mem_gb,
                 "disk_gb": classic_disk_gb,
                 "vm_list": classic_vm_list,
@@ -2162,6 +2625,7 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
                 "vmware_only": hc_vmware_only,
                 "nutanix_count": hc_nutanix,
                 "cpu_total": hc_cpu,
+                "cpu_real_total": hc_cpu_real,
                 "memory_gb": hc_mem_gb,
                 "disk_gb": hc_disk_gb,
                 "vm_list": hc_vm_list,
@@ -2539,6 +3003,471 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
 
         cache.set(cache_key, result)
         return result
+
+    # ------------------------------------------------------------------
+    # Backup job statistics (Phase 1) — Veeam / Zerto / NetBackup
+    # ------------------------------------------------------------------
+
+    # Postgres date_trunc accepts these granularities.
+    _ALLOWED_GRANULARITIES = ("day", "week", "month")
+
+    # Backup-jobs cache için override TTL. Global cache_ttl_seconds (1200s/20dk)
+    # warm pass interval'ından kısa olduğu için backup-jobs key'leri TTL geçtikten
+    # sonra cache miss yaşıyordu. Bu TTL 35dk = 30dk warm interval + 5dk emniyet
+    # marjı, böylece her warm pass key'leri expire OLMADAN overwrite eder.
+    # Sadece backup-jobs key'lerine uygulanır; diğer endpoint'lerin TTL'i değişmez.
+    _BACKUP_JOBS_CACHE_TTL_SECONDS = 2100
+
+    def _trigger_async_jobs_compute(
+        self,
+        vendor: str,
+        gran: str,
+        start_ts,
+        end_ts,
+        tr_start: str,
+        tr_end: str,
+    ) -> None:
+        """
+        Stale-while-revalidate için arka planda yeni hesaplama tetikler.
+        Singleflight altında çalışır, eş zamanlı tetiklerde tek SQL pass garantili.
+        """
+        compute_map = {
+            "veeam": self._compute_all_dc_veeam_jobs,
+            "zerto": self._compute_all_dc_zerto_jobs,
+            "netbackup": self._compute_all_dc_netbackup_jobs,
+        }
+        compute_fn = compute_map.get(vendor)
+        if compute_fn is None:
+            return
+        sf_key = f"_sf:{vendor}_jobs:{tr_start}:{tr_end}:{gran}"
+
+        def _bg() -> None:
+            try:
+                cache.run_singleflight(
+                    sf_key,
+                    lambda: compute_fn(gran, start_ts, end_ts, tr_start, tr_end),
+                    ttl=60,
+                )
+            except Exception as exc:  # noqa: BLE001 — background log only
+                logger.warning("Stale-revalidate %s failed: %s", vendor, exc)
+
+        threading.Thread(
+            target=_bg, daemon=True, name=f"bkp-stale-refresh-{vendor}"
+        ).start()
+
+    @staticmethod
+    def _normalize_granularity(value: str | None) -> str:
+        v = (value or "day").lower().strip()
+        if v in ("daily", "day"):
+            return "day"
+        if v in ("weekly", "week"):
+            return "week"
+        if v in ("monthly", "month"):
+            return "month"
+        return "day"
+
+    @staticmethod
+    def _normalize_veeam_result(raw: str | None) -> str:
+        if not raw:
+            return "other"
+        v = str(raw).strip().lower()
+        if v == "success":
+            return "success"
+        if v == "failed":
+            return "failed"
+        if v == "warning":
+            return "warning"
+        if v == "none":
+            return "running"
+        return "other"
+
+    @staticmethod
+    def _normalize_zerto_status(raw) -> str:
+        """Zerto VPG status enum: 1=MeetingSLA (success), 2/3=problematic, 0/5=in-progress, 4=removing."""
+        try:
+            code = int(raw)
+        except (TypeError, ValueError):
+            return "other"
+        if code == 1:
+            return "success"
+        if code in (2, 3):
+            return "failed"
+        if code in (0, 5):
+            return "running"
+        if code == 4:
+            return "warning"
+        return "other"
+
+    @staticmethod
+    def _normalize_netbackup_status(raw) -> str:
+        """NetBackup exit code: 0=success, 1=partial(warning), other=failed."""
+        try:
+            code = int(raw)
+        except (TypeError, ValueError):
+            return "other"
+        if code == 0:
+            return "success"
+        if code == 1:
+            return "warning"
+        return "failed"
+
+    def _build_ip_to_dc_map(self, rows: list[tuple], ip_index: int, label_index: int) -> dict[str, str]:
+        """Extract DC code from a free-text label column; map source_ip → DC code (UPPER)."""
+        dc_set = {dc.upper() for dc in self.dc_list}
+        ip_to_dc: dict[str, str] = {}
+        for row in rows or []:
+            if row is None or len(row) <= max(ip_index, label_index):
+                continue
+            ip = row[ip_index]
+            label = row[label_index]
+            if not ip or not label:
+                continue
+            dc = self._extract_dc_from_text(label, dc_set)
+            if dc:
+                ip_to_dc[str(ip)] = dc.upper()
+        return ip_to_dc
+
+    @staticmethod
+    def _utc_now_iso() -> str:
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @staticmethod
+    def _empty_job_stats(vendor: str, granularity: str, time_range: dict) -> dict:
+        return {
+            "vendor": vendor,
+            "granularity": granularity,
+            "range": {"start": str(time_range.get("start", "")), "end": str(time_range.get("end", ""))},
+            "series": [],
+            "totals": {
+                "total": 0,
+                "success": 0,
+                "failed": 0,
+                "warning": 0,
+                "other": 0,
+                "success_rate": 0.0,
+                "avg_per_period": 0.0,
+                "period_count": 0,
+            },
+            "as_of": DatabaseService._utc_now_iso(),
+        }
+
+    @staticmethod
+    def _finalize_job_stats(
+        series: list[dict],
+        vendor: str,
+        granularity: str,
+        time_range: dict,
+        as_of: str | None = None,
+    ) -> dict:
+        """Compute totals + success rate + avg per period over an already-collapsed series."""
+        total = sum(int(p.get("count", 0)) for p in series)
+        success = sum(int(p["count"]) for p in series if p.get("status") == "success")
+        failed = sum(int(p["count"]) for p in series if p.get("status") == "failed")
+        warning = sum(int(p["count"]) for p in series if p.get("status") == "warning")
+        other = max(total - success - failed - warning, 0)
+        success_rate = (success / total * 100.0) if total else 0.0
+        period_count = len({p.get("period") for p in series if p.get("period")})
+        avg_per_period = (total / period_count) if period_count else 0.0
+        return {
+            "vendor": vendor,
+            "granularity": granularity,
+            "range": {"start": str(time_range.get("start", "")), "end": str(time_range.get("end", ""))},
+            "series": series,
+            "totals": {
+                "total": total,
+                "success": success,
+                "failed": failed,
+                "warning": warning,
+                "other": other,
+                "success_rate": round(success_rate, 2),
+                "avg_per_period": round(avg_per_period, 2),
+                "period_count": period_count,
+            },
+            "as_of": as_of or DatabaseService._utc_now_iso(),
+        }
+
+    # ---- Veeam jobs --------------------------------------------------------
+
+    def _compute_all_dc_veeam_jobs(
+        self,
+        gran: str,
+        start_ts,
+        end_ts,
+        tr_start: str,
+        tr_end: str,
+    ) -> dict[str, dict]:
+        """
+        Tek SQL geçişiyle TÜM DC'lerin Veeam job stat'lerini hesapla; her DC'nin
+        payload'unu kendi cache key'ine yaz. Singleflight altında çağrıldığı için
+        eş zamanlı miss'lerde tek SQL run.
+
+        Phase 1'deki "her DC için ayrı SQL" hatasını giderir — warm pass'te
+        14 SQL × 504 task yerine 1 SQL × 36 task çalışır.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                agg_rows = self._run_rows(cur, bq.VEEAM_SESSION_JOB_STATS, (gran, start_ts, end_ts))
+                seed_rows = self._run_rows(cur, bq.VEEAM_IP_TO_DC_SEED, (start_ts, end_ts))
+
+        ip_to_dc = self._build_ip_to_dc_map(seed_rows or [], ip_index=0, label_index=1)
+
+        per_dc_collapsed: dict[str, dict[tuple, int]] = {}
+        for row in agg_rows or []:
+            period, source_ip, result, session_type, cnt = row
+            dc = ip_to_dc.get(str(source_ip))
+            if not dc:
+                continue
+            status = self._normalize_veeam_result(result)
+            period_key = period.date().isoformat() if hasattr(period, "date") else str(period)
+            key = (period_key, status, session_type or "Unknown")
+            bucket = per_dc_collapsed.setdefault(dc.upper(), {})
+            bucket[key] = bucket.get(key, 0) + int(cnt or 0)
+
+        tr = {"start": tr_start, "end": tr_end}
+        out: dict[str, dict] = {}
+        for dc_code in self.dc_list:
+            dc_upper = dc_code.upper()
+            collapsed = per_dc_collapsed.get(dc_upper, {})
+            if collapsed:
+                series = [
+                    {"period": p, "status": s, "job_type": t, "policy_type": None, "count": c}
+                    for (p, s, t), c in sorted(collapsed.items())
+                ]
+                payload = self._finalize_job_stats(series, "veeam", gran, tr)
+            else:
+                payload = self._empty_job_stats("veeam", gran, tr)
+            out[dc_upper] = payload
+            cache.set_with_stale(
+                f"dc_veeam_jobs:{dc_code}:{tr_start}:{tr_end}:{gran}",
+                payload,
+                fresh_ttl=self._BACKUP_JOBS_CACHE_TTL_SECONDS,
+            )
+        return out
+
+    def get_dc_veeam_jobs(
+        self,
+        dc_code: str,
+        time_range: dict | None = None,
+        granularity: str = "day",
+    ) -> dict:
+        tr = time_range or default_time_range()
+        start_ts, end_ts = time_range_to_bounds(tr)
+        gran = self._normalize_granularity(granularity)
+        tr_start = str(tr.get("start", ""))
+        tr_end = str(tr.get("end", ""))
+        cache_key = f"dc_veeam_jobs:{dc_code}:{tr_start}:{tr_end}:{gran}"
+
+        # Stale-while-revalidate: fresh varsa direkt dön; stale varsa direkt
+        # dön + arka planda yeniden hesap tetikle; ikisi de yoksa senkronize hesap.
+        value, is_stale = cache.get_with_stale(cache_key)
+        if value is not None:
+            if is_stale:
+                # Fresh key'i stale snapshot'tan re-write et — cache_backend
+                # memory→Redis backfill'i default TTL kullanıyor; bu TTL'imizi
+                # 35dk'da tutar. Background refresh sonucunu hala overwrite eder.
+                cache.set(cache_key, value, ttl=self._BACKUP_JOBS_CACHE_TTL_SECONDS)
+                self._trigger_async_jobs_compute("veeam", gran, start_ts, end_ts, tr_start, tr_end)
+            return value
+
+        sf_key = f"_sf:veeam_jobs:{tr_start}:{tr_end}:{gran}"
+        try:
+            all_payloads = cache.run_singleflight(
+                sf_key,
+                lambda: self._compute_all_dc_veeam_jobs(gran, start_ts, end_ts, tr_start, tr_end),
+                ttl=60,
+            )
+        except (OperationalError, PoolError) as exc:
+            logger.warning("get_dc_veeam_jobs failed for %s: %s", dc_code, exc)
+            return self._empty_job_stats("veeam", gran, tr)
+
+        return (
+            all_payloads.get(dc_code.upper())
+            if isinstance(all_payloads, dict)
+            else None
+        ) or self._empty_job_stats("veeam", gran, tr)
+
+    # ---- Zerto jobs --------------------------------------------------------
+
+    def _compute_all_dc_zerto_jobs(
+        self,
+        gran: str,
+        start_ts,
+        end_ts,
+        tr_start: str,
+        tr_end: str,
+    ) -> dict[str, dict]:
+        """
+        Tek SQL geçişiyle TÜM DC'lerin Zerto VPG job stat'lerini hesapla;
+        her DC'nin payload'unu kendi cache key'ine yaz. source_site DC label'ı
+        zaten satırda olduğu için aux query gerekmiyor.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                agg_rows = self._run_rows(cur, bq.ZERTO_VPG_JOB_STATS, (gran, start_ts, end_ts))
+
+        dc_set = {dc.upper() for dc in self.dc_list}
+        per_dc_collapsed: dict[str, dict[tuple, int]] = {}
+        for row in agg_rows or []:
+            period, source_site, status_int, cnt = row
+            dc = self._extract_dc_from_text(source_site, dc_set)
+            if not dc:
+                continue
+            status = self._normalize_zerto_status(status_int)
+            period_key = period.date().isoformat() if hasattr(period, "date") else str(period)
+            key = (period_key, status, f"status_{status_int}")
+            bucket = per_dc_collapsed.setdefault(dc.upper(), {})
+            bucket[key] = bucket.get(key, 0) + int(cnt or 0)
+
+        tr = {"start": tr_start, "end": tr_end}
+        out: dict[str, dict] = {}
+        for dc_code in self.dc_list:
+            dc_upper = dc_code.upper()
+            collapsed = per_dc_collapsed.get(dc_upper, {})
+            if collapsed:
+                series = [
+                    {"period": p, "status": s, "job_type": t, "policy_type": None, "count": c}
+                    for (p, s, t), c in sorted(collapsed.items())
+                ]
+                payload = self._finalize_job_stats(series, "zerto", gran, tr)
+            else:
+                payload = self._empty_job_stats("zerto", gran, tr)
+            out[dc_upper] = payload
+            cache.set_with_stale(
+                f"dc_zerto_jobs:{dc_code}:{tr_start}:{tr_end}:{gran}",
+                payload,
+                fresh_ttl=self._BACKUP_JOBS_CACHE_TTL_SECONDS,
+            )
+        return out
+
+    def get_dc_zerto_jobs(
+        self,
+        dc_code: str,
+        time_range: dict | None = None,
+        granularity: str = "day",
+    ) -> dict:
+        tr = time_range or default_time_range()
+        start_ts, end_ts = time_range_to_bounds(tr)
+        gran = self._normalize_granularity(granularity)
+        tr_start = str(tr.get("start", ""))
+        tr_end = str(tr.get("end", ""))
+        cache_key = f"dc_zerto_jobs:{dc_code}:{tr_start}:{tr_end}:{gran}"
+
+        value, is_stale = cache.get_with_stale(cache_key)
+        if value is not None:
+            if is_stale:
+                cache.set(cache_key, value, ttl=self._BACKUP_JOBS_CACHE_TTL_SECONDS)
+                self._trigger_async_jobs_compute("zerto", gran, start_ts, end_ts, tr_start, tr_end)
+            return value
+
+        sf_key = f"_sf:zerto_jobs:{tr_start}:{tr_end}:{gran}"
+        try:
+            all_payloads = cache.run_singleflight(
+                sf_key,
+                lambda: self._compute_all_dc_zerto_jobs(gran, start_ts, end_ts, tr_start, tr_end),
+                ttl=60,
+            )
+        except (OperationalError, PoolError) as exc:
+            logger.warning("get_dc_zerto_jobs failed for %s: %s", dc_code, exc)
+            return self._empty_job_stats("zerto", gran, tr)
+
+        return (
+            all_payloads.get(dc_code.upper())
+            if isinstance(all_payloads, dict)
+            else None
+        ) or self._empty_job_stats("zerto", gran, tr)
+
+    # ---- NetBackup jobs ----------------------------------------------------
+
+    def _compute_all_dc_netbackup_jobs(
+        self,
+        gran: str,
+        start_ts,
+        end_ts,
+        tr_start: str,
+        tr_end: str,
+    ) -> dict[str, dict]:
+        """
+        Tek SQL geçişiyle TÜM DC'lerin NetBackup job stat'lerini hesapla;
+        her DC'nin payload'unu kendi cache key'ine yaz. destinationmediaservername
+        kolonu DC code'unu (örn. 'nbmediadc14.blt.vc') zaten satırda taşıyor.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                agg_rows = self._run_rows(cur, bq.NETBACKUP_JOB_STATS, (gran, start_ts, end_ts))
+
+        dc_set = {dc.upper() for dc in self.dc_list}
+        per_dc_collapsed: dict[str, dict[tuple, int]] = {}
+        for row in agg_rows or []:
+            period, dc_label, status_int, jobtype, policytype, cnt = row
+            dc = self._extract_dc_from_text(dc_label, dc_set)
+            if not dc:
+                continue
+            status = self._normalize_netbackup_status(status_int)
+            period_key = period.date().isoformat() if hasattr(period, "date") else str(period)
+            key = (period_key, status, jobtype or "Unknown", policytype or "Unknown")
+            bucket = per_dc_collapsed.setdefault(dc.upper(), {})
+            bucket[key] = bucket.get(key, 0) + int(cnt or 0)
+
+        tr = {"start": tr_start, "end": tr_end}
+        out: dict[str, dict] = {}
+        for dc_code in self.dc_list:
+            dc_upper = dc_code.upper()
+            collapsed = per_dc_collapsed.get(dc_upper, {})
+            if collapsed:
+                series = [
+                    {"period": p, "status": s, "job_type": jt, "policy_type": pt, "count": c}
+                    for (p, s, jt, pt), c in sorted(collapsed.items())
+                ]
+                payload = self._finalize_job_stats(series, "netbackup", gran, tr)
+            else:
+                payload = self._empty_job_stats("netbackup", gran, tr)
+            out[dc_upper] = payload
+            cache.set_with_stale(
+                f"dc_netbackup_jobs:{dc_code}:{tr_start}:{tr_end}:{gran}",
+                payload,
+                fresh_ttl=self._BACKUP_JOBS_CACHE_TTL_SECONDS,
+            )
+        return out
+
+    def get_dc_netbackup_jobs(
+        self,
+        dc_code: str,
+        time_range: dict | None = None,
+        granularity: str = "day",
+    ) -> dict:
+        tr = time_range or default_time_range()
+        start_ts, end_ts = time_range_to_bounds(tr)
+        gran = self._normalize_granularity(granularity)
+        tr_start = str(tr.get("start", ""))
+        tr_end = str(tr.get("end", ""))
+        cache_key = f"dc_netbackup_jobs:{dc_code}:{tr_start}:{tr_end}:{gran}"
+
+        value, is_stale = cache.get_with_stale(cache_key)
+        if value is not None:
+            if is_stale:
+                cache.set(cache_key, value, ttl=self._BACKUP_JOBS_CACHE_TTL_SECONDS)
+                self._trigger_async_jobs_compute("netbackup", gran, start_ts, end_ts, tr_start, tr_end)
+            return value
+
+        sf_key = f"_sf:netbackup_jobs:{tr_start}:{tr_end}:{gran}"
+        try:
+            all_payloads = cache.run_singleflight(
+                sf_key,
+                lambda: self._compute_all_dc_netbackup_jobs(gran, start_ts, end_ts, tr_start, tr_end),
+                ttl=60,
+            )
+        except (OperationalError, PoolError) as exc:
+            logger.warning("get_dc_netbackup_jobs failed for %s: %s", dc_code, exc)
+            return self._empty_job_stats("netbackup", gran, tr)
+
+        return (
+            all_payloads.get(dc_code.upper())
+            if isinstance(all_payloads, dict)
+            else None
+        ) or self._empty_job_stats("netbackup", gran, tr)
+
     def _fetch_customer_s3_vaults(self, customer_name: str, start_ts, end_ts) -> dict:
         """
         Fetch raw S3 vault metrics for a customer directly from the database.
@@ -2693,8 +3622,11 @@ SELECT
     primary_ip_address
 FROM public.discovery_netbox_inventory_device
 WHERE
+    status_value = 'active'
+    AND (
     primary_ip_address = %s
  OR primary_ip_address ILIKE %s
+    )
 ORDER BY collection_time DESC NULLS LAST
 LIMIT 20
 """,
@@ -3143,6 +4075,13 @@ JOIN latest l
                     }
                 )
 
+            excluded_roles = self._excluded_roles_for_scope("datacenter")
+            if excluded_roles:
+                devices = [
+                    d for d in devices
+                    if not is_role_excluded(d.get("device_role_name"), excluded_roles)
+                ]
+
             # Optional hierarchical filters
             if manufacturer is not None:
                 devices = [d for d in devices if d.get("manufacturer_name") == manufacturer]
@@ -3162,22 +4101,96 @@ JOIN latest l
         cache.set(cache_key, result)
         return result
 
-    def get_network_filters(self, dc_code: str, time_range: dict | None = None) -> dict:
+    def _resolve_scoped_network_devices(
+        self,
+        dc_target: str,
+        tr: dict,
+        interface_scope: str | None,
+        manufacturer: str | None = None,
+        device_name: str | None = None,
+    ) -> dict:
+        """Resolve hosts from scoped interface table (or all DC devices for overview)."""
+        if not interface_scope or interface_scope == "overview":
+            return self._resolve_zabbix_dc_devices(
+                dc_target,
+                tr,
+                manufacturer=manufacturer,
+                device_name=device_name,
+            )
+
+        start_ts, end_ts = time_range_to_bounds(tr)
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    rows = self._run_rows(
+                        cur,
+                        znq.build_scoped_hosts_for_dc_sql(interface_scope),
+                        (dc_target, start_ts, end_ts),
+                    )
+        except (OperationalError, PoolError, ValueError) as exc:
+            logger.warning("Scoped network host resolution failed for %s: %s", dc_target, exc)
+            return {"devices": [], "hosts": [], "loki_ids": []}
+
+        devices: list[dict] = []
+        for host, manufacturer_val, device_name_val, device_role_val in (rows or []):
+            devices.append(
+                {
+                    "host": str(host) if host is not None else None,
+                    "device_name": device_name_val or "Unknown",
+                    "manufacturer_name": manufacturer_val or "Unknown",
+                    "device_role_name": device_role_val or "Unknown",
+                }
+            )
+
+        if manufacturer is not None:
+            devices = [d for d in devices if d.get("manufacturer_name") == manufacturer]
+        if device_name is not None:
+            devices = [d for d in devices if d.get("device_name") == device_name]
+
+        hosts = sorted({d.get("host") for d in devices if d.get("host")})
+        return {"devices": devices, "hosts": hosts, "loki_ids": []}
+
+    def get_network_filters(
+        self,
+        dc_code: str,
+        time_range: dict | None = None,
+        interface_scope: str | None = None,
+    ) -> dict:
         """
-        Return hierarchical filter options (Manufacturer -> Device Role -> Device).
-        Values are derived from Zabbix network device rows (latest snapshot).
+        Return filter options for the Network dashboard.
+        When interface_scope is set, manufacturers/devices come from the scoped interface table.
         """
         tr = time_range or default_time_range()
         dc_target = (dc_code or "").upper()
+        empty = {
+            "manufacturers": [],
+            "roles_by_manufacturer": {},
+            "devices_by_manufacturer_role": {},
+            "devices_by_manufacturer": {},
+            "interface_scope": interface_scope or "overview",
+        }
         if not dc_target:
-            return {"manufacturers": [], "roles_by_manufacturer": {}, "devices_by_manufacturer_role": {}}
+            return empty
 
-        resolved = self._resolve_zabbix_dc_devices(dc_target, tr)
+        scope_key = interface_scope or "overview"
+        cache_key = (
+            f"dc_zabbix_net_filters:{dc_target}:scope={scope_key}:"
+            f"{tr.get('start','')}:{tr.get('end','')}"
+        )
+        cached_val = cache.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
+        if scope_key != "overview":
+            resolved = self._resolve_scoped_network_devices(dc_target, tr, interface_scope)
+        else:
+            resolved = self._resolve_zabbix_dc_devices(dc_target, tr)
         devices = resolved.get("devices") or []
 
         manufacturers = sorted({d.get("manufacturer_name") or "Unknown" for d in devices})
-        roles_by_manufacturer: dict[str, list[str]] = {}
-        devices_by_manufacturer_role: dict[str, dict[str, list[str]]] = {}
+        roles_by_manufacturer: dict[str, set[str]] = {}
+        devices_by_manufacturer_role: dict[str, dict[str, set[str]]] = {}
+        devices_by_manufacturer: dict[str, set[str]] = {}
 
         for d in devices:
             manu = d.get("manufacturer_name") or "Unknown"
@@ -3186,20 +4199,24 @@ JOIN latest l
 
             roles_by_manufacturer.setdefault(manu, set()).add(role)
             devices_by_manufacturer_role.setdefault(manu, {}).setdefault(role, set()).add(dev_name)
+            devices_by_manufacturer.setdefault(manu, set()).add(dev_name)
 
-        roles_by_manufacturer = {
-            manu: sorted(list(roles_set)) for manu, roles_set in roles_by_manufacturer.items()
-        }
-        devices_by_manufacturer_role = {
-            manu: {role: sorted(list(dev_set)) for role, dev_set in roles_map.items()}
-            for manu, roles_map in devices_by_manufacturer_role.items()
-        }
-
-        return {
+        result = {
             "manufacturers": manufacturers,
-            "roles_by_manufacturer": roles_by_manufacturer,
-            "devices_by_manufacturer_role": devices_by_manufacturer_role,
+            "roles_by_manufacturer": {
+                manu: sorted(list(roles_set)) for manu, roles_set in roles_by_manufacturer.items()
+            },
+            "devices_by_manufacturer_role": {
+                manu: {role: sorted(list(dev_set)) for role, dev_set in roles_map.items()}
+                for manu, roles_map in devices_by_manufacturer_role.items()
+            },
+            "devices_by_manufacturer": {
+                manu: sorted(list(dev_set)) for manu, dev_set in devices_by_manufacturer.items()
+            },
+            "interface_scope": scope_key,
         }
+        cache.set(cache_key, result)
+        return result
 
     def get_network_port_summary(
         self,
@@ -3208,47 +4225,94 @@ JOIN latest l
         manufacturer: str | None = None,
         device_role: str | None = None,
         device_name: str | None = None,
+        interface_scope: str | None = None,
     ) -> dict:
         """
         Return KPI numbers for the Network Dashboard port capacity view.
-        Aggregation is done from latest-per-device Zabbix snapshots.
+        When interface_scope is set, counts come from scoped interface tables.
         """
         tr = time_range or default_time_range()
         dc_target = (dc_code or "").upper()
+        scope_key = interface_scope or "overview"
+        empty = {
+            "device_count": 0,
+            "total_ports": 0,
+            "active_ports": 0,
+            "avg_icmp_loss_pct": 0.0,
+            "interface_scope": scope_key,
+        }
         if not dc_target:
-            return {"device_count": 0, "total_ports": 0, "active_ports": 0, "avg_icmp_loss_pct": 0.0}
+            return empty
 
         cache_key = (
             f"dc_zabbix_net_port_summary:{dc_target}:"
             f"{manufacturer or ''}:{device_role or ''}:{device_name or ''}:"
-            f"{tr.get('start','')}:{tr.get('end','')}"
+            f"scope={scope_key}:{tr.get('start','')}:{tr.get('end','')}"
         )
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
 
-        resolved = self._resolve_zabbix_dc_devices(
-            dc_target,
-            tr,
-            manufacturer=manufacturer,
-            device_role=device_role,
-            device_name=device_name,
-        )
-        devices = resolved.get("devices") or []
+        if scope_key != "overview":
+            resolved = self._resolve_scoped_network_devices(
+                dc_target,
+                tr,
+                interface_scope,
+                manufacturer=manufacturer,
+                device_name=device_name,
+            )
+            hosts: list[str] = resolved.get("hosts") or []
+            if not hosts:
+                cache.set(cache_key, empty)
+                return empty
 
-        device_count = len(devices)
-        total_ports = sum(int(d.get("total_ports_count") or 0) for d in devices)
-        active_ports = sum(int(d.get("active_ports_count") or 0) for d in devices)
-        avg_icmp_loss_pct = (
-            sum(float(d.get("icmp_loss_pct") or 0) for d in devices) / device_count if device_count else 0.0
-        )
-
-        result = {
-            "device_count": int(device_count),
-            "total_ports": int(total_ports),
-            "active_ports": int(active_ports),
-            "avg_icmp_loss_pct": float(avg_icmp_loss_pct),
-        }
+            start_ts, end_ts = time_range_to_bounds(tr)
+            try:
+                with self._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        row = self._run_rows(
+                            cur,
+                            znq.build_scoped_port_summary_sql(interface_scope),
+                            (hosts, start_ts, end_ts, hosts, start_ts, end_ts),
+                        )
+                if row:
+                    device_count, total_ports, active_ports, avg_icmp_loss_pct = row[0]
+                    result = {
+                        "device_count": int(device_count or 0),
+                        "total_ports": int(total_ports or 0),
+                        "active_ports": int(active_ports or 0),
+                        "avg_icmp_loss_pct": float(avg_icmp_loss_pct or 0),
+                        "interface_scope": scope_key,
+                    }
+                else:
+                    result = dict(empty)
+            except (OperationalError, PoolError, ValueError) as exc:
+                logger.warning("get_network_port_summary scoped failed for %s: %s", dc_target, exc)
+                result = dict(empty)
+        else:
+            resolved = self._resolve_zabbix_dc_devices(
+                dc_target,
+                tr,
+                manufacturer=manufacturer,
+                device_role=device_role,
+                device_name=device_name,
+            )
+            devices = resolved.get("devices") or []
+            device_count = len(devices)
+            total_ports = sum(int(d.get("total_ports_count") or 0) for d in devices)
+            active_ports = sum(int(d.get("active_ports_count") or 0) for d in devices)
+            avg_icmp_loss_pct = (
+                sum(float(d.get("icmp_loss_pct") or 0) for d in devices) / device_count
+                if device_count
+                else 0.0
+            )
+            result = {
+                "device_count": int(device_count),
+                "total_ports": int(total_ports),
+                "active_ports": int(active_ports),
+                "avg_icmp_loss_pct": float(avg_icmp_loss_pct),
+                "interface_scope": scope_key,
+            }
 
         cache.set(cache_key, result)
         return result
@@ -3261,6 +4325,7 @@ JOIN latest l
         device_role: str | None = None,
         device_name: str | None = None,
         top_n: int = 20,
+        interface_scope: str | None = None,
     ) -> dict:
         """
         Compute interface 95th percentile bandwidth (p95_rx/p95_tx) for the
@@ -3271,25 +4336,35 @@ JOIN latest l
         if not dc_target:
             return {"top_interfaces": [], "overall_port_utilization_pct": 0.0}
 
+        scope_key = interface_scope or "overview"
         cache_key = (
             f"dc_zabbix_net_95:{dc_target}:"
             f"{manufacturer or ''}:{device_role or ''}:{device_name or ''}:"
-            f"top={top_n}:{tr.get('start','')}:{tr.get('end','')}"
+            f"scope={scope_key}:top={top_n}:{tr.get('start','')}:{tr.get('end','')}"
         )
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
 
-        resolved = self._resolve_zabbix_dc_devices(
-            dc_target,
-            tr,
-            manufacturer=manufacturer,
-            device_role=device_role,
-            device_name=device_name,
-        )
+        if scope_key != "overview":
+            resolved = self._resolve_scoped_network_devices(
+                dc_target,
+                tr,
+                interface_scope,
+                manufacturer=manufacturer,
+                device_name=device_name,
+            )
+        else:
+            resolved = self._resolve_zabbix_dc_devices(
+                dc_target,
+                tr,
+                manufacturer=manufacturer,
+                device_role=device_role,
+                device_name=device_name,
+            )
         hosts: list[str] = resolved.get("hosts") or []
         if not hosts:
-            result = {"top_interfaces": [], "overall_port_utilization_pct": 0.0}
+            result = {"top_interfaces": [], "overall_port_utilization_pct": 0.0, "interface_scope": scope_key}
             cache.set(cache_key, result)
             return result
 
@@ -3299,7 +4374,7 @@ JOIN latest l
                 with conn.cursor() as cur:
                     rows = self._run_rows(
                         cur,
-                        znq.INTERFACE_95TH_PERCENTILE,
+                        znq.build_interface_95th_percentile_sql(interface_scope),
                         (hosts, start_ts, end_ts),
                     )
 
@@ -3309,19 +4384,18 @@ JOIN latest l
 
             sum_total = 0.0
             sum_speed = 0.0
-            for (
-                iface_name,
-                iface_alias,
-                p95_rx_bps,
-                p95_tx_bps,
-                p95_total_bps,
-                speed_bps,
-            ) in top_rows:
+            for row in top_rows:
+                if len(row) >= 7:
+                    host_name, iface_name, iface_alias, p95_rx_bps, p95_tx_bps, p95_total_bps, speed_bps = row
+                else:
+                    host_name = None
+                    iface_name, iface_alias, p95_rx_bps, p95_tx_bps, p95_total_bps, speed_bps = row
                 p95_total = float(p95_total_bps or 0)
                 speed = float(speed_bps or 0)
                 utilization_pct = (p95_total / speed * 100.0) if speed > 0 else 0.0
                 top_interfaces.append(
                     {
+                        "host": host_name,
                         "interface_name": iface_name,
                         "interface_alias": iface_alias,
                         "p95_rx_bps": float(p95_rx_bps or 0),
@@ -3338,10 +4412,11 @@ JOIN latest l
             result = {
                 "top_interfaces": top_interfaces,
                 "overall_port_utilization_pct": float(overall_port_utilization_pct),
+                "interface_scope": scope_key,
             }
-        except (OperationalError, PoolError) as exc:
+        except (OperationalError, PoolError, ValueError) as exc:
             logger.warning("get_network_95th_percentile failed for %s: %s", dc_target, exc)
-            result = {"top_interfaces": [], "overall_port_utilization_pct": 0.0}
+            result = {"top_interfaces": [], "overall_port_utilization_pct": 0.0, "interface_scope": scope_key}
 
         cache.set(cache_key, result)
         return result
@@ -3356,6 +4431,7 @@ JOIN latest l
         page: int = 1,
         page_size: int = 50,
         search: str | None = None,
+        interface_scope: str | None = None,
     ) -> dict:
         """
         Return a paginated, searchable table of interface p95 bandwidth stats.
@@ -3371,26 +4447,41 @@ JOIN latest l
         search_val = (search or "").strip()
         like = f"%{search_val}%"
 
+        scope_key = interface_scope or "overview"
         cache_key = (
             f"dc_zabbix_net_iface_table:{dc_target}:"
             f"{manufacturer or ''}:{device_role or ''}:{device_name or ''}:"
-            f"p={page_safe}:ps={page_size_safe}:q={search_val}:"
+            f"scope={scope_key}:p={page_safe}:ps={page_size_safe}:q={search_val}:"
             f"{tr.get('start','')}:{tr.get('end','')}"
         )
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
 
-        resolved = self._resolve_zabbix_dc_devices(
-            dc_target,
-            tr,
-            manufacturer=manufacturer,
-            device_role=device_role,
-            device_name=device_name,
-        )
+        if scope_key != "overview":
+            resolved = self._resolve_scoped_network_devices(
+                dc_target,
+                tr,
+                interface_scope,
+                manufacturer=manufacturer,
+                device_name=device_name,
+            )
+        else:
+            resolved = self._resolve_zabbix_dc_devices(
+                dc_target,
+                tr,
+                manufacturer=manufacturer,
+                device_role=device_role,
+                device_name=device_name,
+            )
         hosts: list[str] = resolved.get("hosts") or []
         if not hosts:
-            result = {"items": [], "page": page_safe, "page_size": page_size_safe}
+            result = {
+                "items": [],
+                "page": page_safe,
+                "page_size": page_size_safe,
+                "interface_scope": scope_key,
+            }
             cache.set(cache_key, result)
             return result
 
@@ -3398,26 +4489,39 @@ JOIN latest l
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
+                    # Prevent a slow DISTINCT ON / p95 CTE from hanging the worker
+                    # and OOM-killing the container. 90 s covers the current ~52 s runtime.
+                    cur.execute("SET statement_timeout = '90000'")
+                    sql = znq.build_interface_bandwidth_table_p95_sql(interface_scope)
                     rows = self._run_rows(
                         cur,
-                        znq.INTERFACE_BANDWIDTH_TABLE_P95,
-                        (hosts, start_ts, end_ts, search_val, like, like, page_size_safe, offset),
+                        sql,
+                        (
+                            hosts,
+                            start_ts,
+                            end_ts,
+                            search_val,
+                            like,
+                            like,
+                            like,
+                            page_size_safe,
+                            offset,
+                        ),
                     )
 
             items: list[dict] = []
-            for (
-                iface_name,
-                iface_alias,
-                p95_rx_bps,
-                p95_tx_bps,
-                p95_total_bps,
-                speed_bps,
-            ) in (rows or []):
+            for row in (rows or []):
+                if len(row) >= 7:
+                    host_name, iface_name, iface_alias, p95_rx_bps, p95_tx_bps, p95_total_bps, speed_bps = row
+                else:
+                    host_name = None
+                    iface_name, iface_alias, p95_rx_bps, p95_tx_bps, p95_total_bps, speed_bps = row
                 speed = float(speed_bps or 0)
                 p95_total = float(p95_total_bps or 0)
                 utilization_pct = (p95_total / speed * 100.0) if speed > 0 else 0.0
                 items.append(
                     {
+                        "host": host_name,
                         "interface_name": iface_name,
                         "interface_alias": iface_alias,
                         "p95_rx_bps": float(p95_rx_bps or 0),
@@ -3428,10 +4532,104 @@ JOIN latest l
                     }
                 )
 
-            result = {"items": items, "page": page_safe, "page_size": page_size_safe, "search": search_val}
-        except (OperationalError, PoolError) as exc:
+            result = {
+                "items": items,
+                "page": page_safe,
+                "page_size": page_size_safe,
+                "search": search_val,
+                "interface_scope": scope_key,
+            }
+        except Exception as exc:
             logger.warning("get_network_interface_table failed for %s: %s", dc_target, exc)
-            result = {"items": [], "page": page_safe, "page_size": page_size_safe, "search": search_val}
+            result = {
+                "items": [],
+                "page": page_safe,
+                "page_size": page_size_safe,
+                "search": search_val,
+                "interface_scope": scope_key,
+            }
+
+        cache.set(cache_key, result)
+        return result
+
+    def get_network_firewall_summary(self, dc_code: str, time_range: dict | None = None) -> dict:
+        tr = time_range or default_time_range()
+        dc_target = (dc_code or "").upper()
+        if not dc_target:
+            return {"devices": []}
+
+        cache_key = f"dc_zabbix_net_firewall:{dc_target}:{tr.get('start','')}:{tr.get('end','')}"
+        cached_val = cache.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
+        start_ts, end_ts = time_range_to_bounds(tr)
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    rows = self._run_rows(cur, znq.FIREWALL_SUMMARY_LATEST, (start_ts, end_ts, dc_target))
+            devices = [
+                {
+                    "host": row[0],
+                    "device_name": row[1],
+                    "manufacturer_name": row[2],
+                    "cpu_utilization_pct": float(row[3] or 0),
+                    "memory_utilization_pct": float(row[4] or 0),
+                    "active_sessions": int(row[5] or 0),
+                    "session_setup_rate": float(row[6] or 0),
+                    "intrusions_detected": int(row[7] or 0),
+                    "intrusions_blocked": int(row[8] or 0),
+                    "ha_mode": row[9],
+                    "ha_cluster_name": row[10],
+                    "icmp_status": row[11],
+                    "icmp_loss_pct": float(row[12] or 0),
+                }
+                for row in (rows or [])
+            ]
+            result = {"devices": devices}
+        except Exception as exc:
+            logger.warning("get_network_firewall_summary failed for %s: %s", dc_target, exc)
+            result = {"devices": []}
+
+        cache.set(cache_key, result)
+        return result
+
+    def get_network_load_balancer_summary(self, dc_code: str, time_range: dict | None = None) -> dict:
+        tr = time_range or default_time_range()
+        dc_target = (dc_code or "").upper()
+        if not dc_target:
+            return {"devices": []}
+
+        cache_key = f"dc_zabbix_net_lb:{dc_target}:{tr.get('start','')}:{tr.get('end','')}"
+        cached_val = cache.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
+        start_ts, end_ts = time_range_to_bounds(tr)
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    rows = self._run_rows(cur, znq.LOAD_BALANCER_SUMMARY_LATEST, (start_ts, end_ts, dc_target))
+            devices = [
+                {
+                    "host": row[0],
+                    "device_name": row[1],
+                    "manufacturer_name": row[2],
+                    "icmp_status": row[3],
+                    "icmp_loss_pct": float(row[4] or 0),
+                    "icmp_response_time_ms": float(row[5] or 0),
+                    "cpu_utilization_pct": float(row[6] or 0),
+                    "memory_utilization_pct": float(row[7] or 0),
+                    "uptime_seconds": int(row[8] or 0),
+                    "total_ports_count": int(row[9] or 0),
+                    "active_ports_count": int(row[10] or 0),
+                }
+                for row in (rows or [])
+            ]
+            result = {"devices": devices}
+        except Exception as exc:
+            logger.warning("get_network_load_balancer_summary failed for %s: %s", dc_target, exc)
+            result = {"devices": []}
 
         cache.set(cache_key, result)
         return result
@@ -3494,6 +4692,10 @@ JOIN latest l
                     }
                 )
 
+            excluded_roles = self._excluded_roles_for_scope("datacenter")
+            if excluded_roles:
+                devices = filter_devices_by_role_exclusion(devices, excluded_roles)
+
             devices.sort(key=lambda d: d.get("total_capacity_bytes", 0), reverse=True)
             result = devices
         except (OperationalError, PoolError) as exc:
@@ -3535,6 +4737,13 @@ JOIN latest l
 
             if host is not None:
                 rows = [r for r in (rows or []) if r and r[1] and str(r[1]) == str(host)]
+
+            excluded_roles = self._excluded_roles_for_scope("datacenter")
+            if excluded_roles:
+                rows = [
+                    r for r in (rows or [])
+                    if r and not is_role_excluded(r[4] if len(r) > 4 else None, excluded_roles)
+                ]
 
             # STORAGE_DEVICES_FOR_DC_LATEST select order:
             # 0:loki_id, 1:host, 2:storage_device_name, 3:manufacturer, 4:device_role,
@@ -3862,15 +5071,32 @@ JOIN latest l
     # Physical Inventory (discovery_netbox_inventory_device)
     # ------------------------------------------------------------------
 
+    def get_netbox_device_roles(self) -> list[dict]:
+        """Return distinct active device roles for Settings multi-select."""
+        cache_key = "netbox:device_roles"
+        cached_val = cache.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    rows = self._run_rows(cur, nbq.DISTINCT_DEVICE_ROLES)
+            result = [{"role": r[0]} for r in (rows or []) if r and r[0]]
+        except (OperationalError, PoolError) as exc:
+            logger.warning("get_netbox_device_roles failed: %s", exc)
+            result = []
+        cache.set(cache_key, result, ttl=3600)
+        return result
+
     # ------------------------------------------------------------------
     # Physical Inventory — raw data loaders (SQL-side)
     # ------------------------------------------------------------------
 
     def _get_physical_inventory_raw(self, *, force: bool = False) -> list[dict]:
         """
-        Fetch all physical devices (latest snapshot per device key) as a plain list of dicts.
+        Fetch active physical devices (status_value = 'active', latest snapshot per device key).
         Result is cached; all derived methods use this single dataset.
-        No JOINs, no aggregations — just a fast DISTINCT ON fetch.
+        No JOINs, no aggregations — DISTINCT ON with SQL-side status filter.
         """
         cache_key = "phys_inv:raw_devices"
         if not force:
@@ -3938,14 +5164,69 @@ JOIN latest l
     # Physical Inventory — derived views (Python-side aggregation)
     # ------------------------------------------------------------------
 
-    def get_physical_inventory_customer(self) -> list[dict]:
-        """Return Boyner (tenant_id=5) physical device list for Customer View (cached)."""
-        cache_key = "phys_inv:customer_boyner"
+    def _excluded_roles_for_scope(self, scope: str, *, webui=None) -> set[str]:
+        pool = webui if webui is not None else getattr(self, "_webui", None)
+        return load_excluded_roles(pool, scope)
+
+    def _filter_phys_inventory_devices(
+        self,
+        devices: list[dict],
+        scope: str,
+        *,
+        webui=None,
+    ) -> list[dict]:
+        excluded = self._excluded_roles_for_scope(scope, webui=webui)
+        return filter_devices_by_role_exclusion(devices, excluded)
+
+    def get_physical_inventory_customer(
+        self,
+        customer_name: str | None = None,
+        *,
+        webui=None,
+    ) -> list[dict]:
+        """Return physical device list for a CRM customer tenant scope (cached)."""
+        normalized = (customer_name or "").strip()
+        cache_key = f"phys_inv:customer:{normalized.casefold() or 'boyner_legacy'}"
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
-        devices = self._get_physical_inventory_raw()
+
+        tenant_ids, text_rules = self._resolve_physical_customer_filters(normalized, webui=webui)
+        devices = self._filter_phys_inventory_devices(
+            self._get_physical_inventory_raw(),
+            "customer",
+            webui=webui,
+        )
         loc_map = self._get_location_dc_map()
+
+        def _matches_device(device: dict) -> bool:
+            if tenant_ids and device.get("tenant_id") in tenant_ids:
+                return True
+            tenant_name = str(device.get("tenant_name") or "")
+            tenant_key = tenant_name.casefold()
+            for method, value in text_rules:
+                needle = (value or "").strip()
+                if not needle:
+                    continue
+                key = needle.casefold()
+                if method == "exact" and tenant_key == key:
+                    return True
+                if method == "prefix" and tenant_key.startswith(key):
+                    return True
+                if method == "suffix" and tenant_key.endswith(key):
+                    return True
+                if method in {"contains", "id_exact"} and key in tenant_key:
+                    return True
+            return False
+
+        if not tenant_ids and not text_rules:
+            # Legacy Boyner fallback when mappings are unavailable.
+            if normalized and "boyner" not in normalized.casefold():
+                result: list[dict] = []
+                cache.set(cache_key, result)
+                return result
+            tenant_ids = {5}
+
         result = [
             {
                 "name": d["name"],
@@ -3954,11 +5235,62 @@ JOIN latest l
                 "location": self._resolve_device_location(d, loc_map),
             }
             for d in devices
-            if d.get("tenant_id") == 5
+            if _matches_device(d)
         ]
         result.sort(key=lambda x: (x["device_role_name"], x["name"]))
         cache.set(cache_key, result)
         return result
+
+    @staticmethod
+    def _resolve_physical_customer_filters(
+        customer_name: str,
+        *,
+        webui=None,
+    ) -> tuple[set[int], list[tuple[str, str]]]:
+        tenant_ids: set[int] = set()
+        text_rules: list[tuple[str, str]] = []
+        if not customer_name:
+            tenant_ids.add(5)
+            return tenant_ids, text_rules
+
+        account_id = None
+        if webui is not None and getattr(webui, "is_available", False):
+            try:
+                resolved = webui.run_one(
+                    crm_q.WEBUI_RESOLVE_ACCOUNTID_BY_DISPLAY_NAME,
+                    (customer_name, customer_name, customer_name),
+                )
+                if resolved and resolved.get("crm_accountid"):
+                    account_id = str(resolved["crm_accountid"])
+            except Exception as exc:
+                logger.warning("Physical inventory alias resolve failed: %s", exc)
+
+        mapping_rows: list[dict] = []
+        if account_id and webui is not None and getattr(webui, "is_available", False):
+            try:
+                mapping_rows = webui.run_rows(
+                    crm_q.WEBUI_PHYSICAL_MAPPINGS_FOR_ACCOUNT,
+                    (account_id,),
+                )
+            except Exception as exc:
+                logger.warning("Physical inventory mapping load failed: %s", exc)
+
+        for row in mapping_rows:
+            method = str(row.get("match_method") or "contains").strip().lower()
+            value = str(row.get("match_value") or "").strip()
+            if not value:
+                continue
+            if method == "id_exact":
+                try:
+                    tenant_ids.add(int(value))
+                except ValueError:
+                    text_rules.append((method, value))
+            else:
+                text_rules.append((method, value))
+
+        if not tenant_ids and not text_rules and "boyner" in customer_name.casefold():
+            tenant_ids.add(5)
+        return tenant_ids, text_rules
 
     def get_physical_inventory_dc(self, dc_name: str) -> dict:
         """Return physical inventory for a DC: total, by_role, by_role_manufacturer (cached)."""
@@ -3971,7 +5303,7 @@ JOIN latest l
         if cached_val is not None:
             return cached_val
 
-        devices = self._get_physical_inventory_raw()
+        devices = self._filter_phys_inventory_devices(self._get_physical_inventory_raw(), "datacenter")
         loc_map = self._get_location_dc_map()
 
         def _matches_dc(d: dict) -> bool:
@@ -4010,7 +5342,7 @@ JOIN latest l
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
-        devices = self._get_physical_inventory_raw()
+        devices = self._filter_phys_inventory_devices(self._get_physical_inventory_raw(), "datacenter")
         role_counts: dict[str, int] = {}
         for d in devices:
             role_counts[d["device_role_name"]] = role_counts.get(d["device_role_name"], 0) + 1
@@ -4030,7 +5362,7 @@ JOIN latest l
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
-        devices = self._get_physical_inventory_raw()
+        devices = self._filter_phys_inventory_devices(self._get_physical_inventory_raw(), "datacenter")
         mfr_counts: dict[str, int] = {}
         for d in devices:
             if d["device_role_name"].lower() == role_key:
@@ -4053,7 +5385,7 @@ JOIN latest l
         cached_val = cache.get(cache_key)
         if cached_val is not None:
             return cached_val
-        devices = self._get_physical_inventory_raw()
+        devices = self._filter_phys_inventory_devices(self._get_physical_inventory_raw(), "datacenter")
         loc_map = self._get_location_dc_map()
         loc_counts: dict[str, int] = {}
         for d in devices:
@@ -4101,6 +5433,86 @@ JOIN latest l
         except Exception as exc:
             logger.warning("Physical inventory cache warm-up failed: %s", exc)
 
+    def get_dc_racks(self, dc_code: str) -> dict:
+        empty = {"racks": [], "summary": {"total_racks": 0, "active_racks": 0, "total_u_height": 0, "racks_with_energy": 0, "racks_with_pdu": 0}}
+        if not dc_code or not dc_code.strip():
+            return empty
+        cache_key = f"dc_racks:{dc_code.strip()}"
+        cached_val = cache.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
+        def _fetch():
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    rows = self._run_rows(cur, drq.RACKS_BY_DC, (dc_code, dc_code))
+                    summary_row = self._run_row(cur, drq.RACK_SUMMARY_BY_DC, (dc_code, dc_code))
+            columns = [
+                "id", "name", "display_name", "status", "status_description",
+                "u_height", "kabin_enerji", "pdu_a_ip", "pdu_b_ip", "rack_type",
+                "serial", "asset_tag", "tenant_name", "facility_id",
+                "weight", "max_weight", "weight_unit",
+                "description", "comments",
+                "first_observed", "last_observed", "location_id", "site_id",
+                "hall_name",
+            ]
+            racks = []
+            for r in (rows or []):
+                rack = {}
+                for i, col in enumerate(columns):
+                    rack[col] = r[i] if i < len(r) else None
+                if rack.get("first_observed"):
+                    rack["first_observed"] = str(rack["first_observed"])
+                if rack.get("last_observed"):
+                    rack["last_observed"] = str(rack["last_observed"])
+                racks.append(rack)
+            s = summary_row or (0, 0, 0, 0, 0)
+            summary = {
+                "total_racks": int(s[0] or 0),
+                "active_racks": int(s[1] or 0),
+                "total_u_height": int(s[2] or 0),
+                "racks_with_energy": int(s[3] or 0),
+                "racks_with_pdu": int(s[4] or 0),
+            }
+            return {"racks": racks, "summary": summary}
+
+        try:
+            result = cache.run_singleflight(cache_key, _fetch, ttl=21600)
+            return result
+        except OperationalError as exc:
+            logger.error("DB unavailable for get_dc_racks(%s): %s", dc_code, exc)
+            return empty
+
+    def get_rack_devices(self, rack_name: str) -> dict:
+        """Return all devices installed in a specific rack (by name), with U position."""
+        if not rack_name or not rack_name.strip():
+            return {"devices": []}
+        cache_key = f"rack_devices:{rack_name.strip()}"
+        cached_val = cache.get(cache_key)
+        if cached_val is not None:
+            return cached_val
+
+        def _fetch():
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    rows = self._run_rows(cur, drq.DEVICES_BY_RACK_NAME, (rack_name.strip(),))
+            columns = ["name", "position", "face", "role", "device_type",
+                       "status_value", "status_label", "manufacturer", "description"]
+            devices = []
+            for r in (rows or []):
+                d = {}
+                for i, col in enumerate(columns):
+                    val = r[i] if i < len(r) else None
+                    d[col] = float(val) if hasattr(val, '__float__') and col == "position" else val
+                devices.append(d)
+            return {"devices": devices}
+
+        try:
+            return cache.run_singleflight(cache_key, _fetch, ttl=21600)
+        except OperationalError as exc:
+            logger.error("DB unavailable for get_rack_devices(%s): %s", rack_name, exc)
+            return {"devices": []}
+
     def warm_cache(self) -> None:
         """
         Pre-load last 7 days into cache at app startup.
@@ -4112,14 +5524,22 @@ JOIN latest l
         t0 = time.perf_counter()
         try:
             tr = default_time_range()
-            # Datacenter-level caches
-            self._rebuild_summary(tr)
+            # Route through the public methods so smart_1h_tr normalisation
+            # writes to the same cache keys the request handlers will read.
+            self.get_all_datacenters_summary(tr)
             self.get_global_overview(tr)
             for cust in WARMED_CUSTOMERS:
                 try:
                     self.get_customer_resources(cust, tr)
                 except Exception as exc:
                     logger.warning("Customer cache warm-up for %s failed: %s", cust, exc)
+
+            # Rack floor map data (time-range independent)
+            try:
+                for dc_code in self._dc_list:
+                    self.get_dc_racks(dc_code)
+            except Exception as exc:
+                logger.warning("Rack cache warm-up failed: %s", exc)
 
             # Physical inventory (time-range independent)
             try:
@@ -4144,7 +5564,7 @@ JOIN latest l
         try:
             ranges = cache_time_ranges()[1:]  # skip 7d, warm 30d + previous month
             for tr in ranges:
-                self._rebuild_summary(tr)
+                self.get_all_datacenters_summary(tr)
                 self.get_global_overview(tr)
             logger.info("Additional cache warm-up complete.")
         except Exception as exc:
@@ -4190,7 +5610,7 @@ JOIN latest l
         logger.info("Background cache refresh started (last 7d, last 30d, previous month).")
         try:
             for tr in cache_time_ranges():
-                self._rebuild_summary(tr)
+                self.get_all_datacenters_summary(tr)
                 self.get_global_overview(tr)
             logger.info("Background cache refresh complete.")
         except Exception as exc:
@@ -4234,10 +5654,13 @@ JOIN latest l
 
         This is called by the background scheduler every 30 minutes. Cache entries
         are updated in place so UI panels continue to use the previous values until
-        new data has been written.
+        new data has been written. Capacity warm runs first (lighter, fast UX win),
+        then jobs warm (heavier aggregations across 4 windows × 3 granularities)
+        runs in a thread pool for parallelism.
         """
         logger.info("Background backup cache refresh started.")
         try:
+            # ---- Capacity warm (existing) -----------------------------------
             for tr in cache_time_ranges():
                 start_ts, end_ts = time_range_to_bounds(tr)
                 for dc_code in self.dc_list:
@@ -4262,9 +5685,113 @@ JOIN latest l
                     except Exception as exc:
                         logger.warning("refresh_backup_cache (Veeam) failed for DC %s: %s", dc_code, exc)
 
+            # ---- Jobs warm (new in Phase 3 A1) ------------------------------
+            self._warm_backup_jobs_cache()
+
             logger.info("Background backup cache refresh complete.")
         except Exception as exc:
             logger.error("Background backup cache refresh failed: %s", exc)
+
+    def _warm_network_cache_for_range(self, tr: dict) -> None:
+        """Warm Zabbix network endpoints for one time range (unfiltered default view)."""
+        for dc_code in self.dc_list:
+            try:
+                filters = self.get_network_filters(dc_code, tr)
+                if not filters.get("manufacturers"):
+                    continue
+                self.get_network_port_summary(dc_code, tr)
+                self.get_network_95th_percentile(dc_code, tr, top_n=20)
+                self.get_network_interface_table(dc_code, tr, page=1, page_size=50)
+            except Exception as exc:
+                logger.warning("network cache warm failed for DC %s: %s", dc_code, exc)
+
+    def warm_network_cache(self) -> None:
+        """
+        Warm Zabbix network cache for the default reporting range.
+
+        Triggered once in the background after startup so Network panels open
+        with data on first visit (same pattern as S3 warm-up).
+        """
+        logger.info("Warming network cache for default time range…")
+        try:
+            tr = default_time_range()
+            self._warm_network_cache_for_range(tr)
+            logger.info("Network cache warm-up complete for default range.")
+        except Exception as exc:
+            logger.warning("Network cache warm-up failed: %s", exc)
+
+    def refresh_network_cache(self) -> None:
+        """
+        Refresh Zabbix network cache for the standard reporting ranges.
+
+        Called by the background scheduler every 30 minutes. Entries are updated
+        in place so the UI keeps serving previous values until new data is written.
+        """
+        logger.info("Background network cache refresh started.")
+        try:
+            for tr in cache_time_ranges():
+                self._warm_network_cache_for_range(tr)
+            logger.info("Background network cache refresh complete.")
+        except Exception as exc:
+            logger.error("Background network cache refresh failed: %s", exc)
+
+    def _warm_backup_jobs_cache(self) -> None:
+        """
+        Warm Phase 1 backup-jobs endpoints for every vendor × window × granularity.
+
+        Sadece (vendor × window × granularity) — toplam 36 task. Her task
+        _compute_all_dc_<vendor>_jobs çağırır ve tek SQL pass'iyle TÜM DC'lere
+        cache yazar. Eski sürümde 504 task vardı (DC döngüsü) — refactor sonrası
+        14x azaldı.
+        """
+        windows = backup_jobs_warm_windows()
+        grans = BACKUP_JOBS_WARM_GRANULARITIES
+        if not self.dc_list:
+            return
+
+        tasks: list[tuple[str, Callable[[], Any]]] = []
+        for tr in windows:
+            start_ts, end_ts = time_range_to_bounds(tr)
+            tr_start = str(tr.get("start", ""))
+            tr_end = str(tr.get("end", ""))
+            for gran in grans:
+                tasks.append((
+                    f"veeam:{tr['preset']}:{gran}",
+                    lambda g=gran, s=start_ts, e=end_ts, ts=tr_start, te=tr_end:
+                        self._compute_all_dc_veeam_jobs(g, s, e, ts, te),
+                ))
+                tasks.append((
+                    f"zerto:{tr['preset']}:{gran}",
+                    lambda g=gran, s=start_ts, e=end_ts, ts=tr_start, te=tr_end:
+                        self._compute_all_dc_zerto_jobs(g, s, e, ts, te),
+                ))
+                tasks.append((
+                    f"netbackup:{tr['preset']}:{gran}",
+                    lambda g=gran, s=start_ts, e=end_ts, ts=tr_start, te=tr_end:
+                        self._compute_all_dc_netbackup_jobs(g, s, e, ts, te),
+                ))
+
+        if not tasks:
+            return
+
+        logger.info(
+            "Backup-jobs warm: %d tasks (windows=%d, grans=%d, vendors=3) — "
+            "each pass caches ALL %d DCs.",
+            len(tasks), len(windows), len(grans), len(self.dc_list),
+        )
+        t0 = time.perf_counter()
+        ok = 0
+        with ThreadPoolExecutor(max_workers=6, thread_name_prefix="bkpjobs-warm") as pool:
+            futures = {pool.submit(fn): label for label, fn in tasks}
+            for fut in futures:
+                label = futures[fut]
+                try:
+                    fut.result()
+                    ok += 1
+                except Exception as exc:
+                    logger.warning("Backup-jobs warm task %s failed: %s", label, exc)
+        logger.info("Backup-jobs warm finished: %d/%d ok in %.2fs.",
+                    ok, len(tasks), time.perf_counter() - t0)
 
     @property
     def dc_list(self) -> list[str]:

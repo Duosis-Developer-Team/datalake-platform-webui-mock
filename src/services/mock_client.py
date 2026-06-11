@@ -154,8 +154,12 @@ def get_dc_storage_performance(dc_code: str, tr: Optional[dict]) -> dict:
     return mock_storage.get_dc_storage_performance(dc_code, tr)
 
 
-def get_dc_network_filters(dc_code: str, tr: Optional[dict]) -> dict:
-    return mock_net.get_dc_network_filters(dc_code, tr)
+def get_dc_network_filters(
+    dc_code: str,
+    tr: Optional[dict],
+    interface_scope: Optional[str] = None,
+) -> dict:
+    return mock_net.get_dc_network_filters(dc_code, tr, interface_scope)
 
 
 def get_dc_network_port_summary(
@@ -164,8 +168,11 @@ def get_dc_network_port_summary(
     manufacturer: Optional[str] = None,
     device_role: Optional[str] = None,
     device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
 ) -> dict:
-    return mock_net.get_dc_network_port_summary(dc_code, tr, manufacturer, device_role, device_name)
+    return mock_net.get_dc_network_port_summary(
+        dc_code, tr, manufacturer, device_role, device_name, interface_scope
+    )
 
 
 def get_dc_network_95th_percentile(
@@ -175,9 +182,10 @@ def get_dc_network_95th_percentile(
     manufacturer: Optional[str] = None,
     device_role: Optional[str] = None,
     device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
 ) -> dict:
     return mock_net.get_dc_network_95th_percentile(
-        dc_code, tr, top_n, manufacturer, device_role, device_name
+        dc_code, tr, top_n, manufacturer, device_role, device_name, interface_scope
     )
 
 
@@ -190,10 +198,27 @@ def get_dc_network_interface_table(
     manufacturer: Optional[str] = None,
     device_role: Optional[str] = None,
     device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
 ) -> dict:
     return mock_net.get_dc_network_interface_table(
-        dc_code, tr, page, page_size, search, manufacturer, device_role, device_name
+        dc_code,
+        tr,
+        page,
+        page_size,
+        search,
+        manufacturer,
+        device_role,
+        device_name,
+        interface_scope,
     )
+
+
+def get_dc_network_firewall_summary(dc_code: str, tr: Optional[dict]) -> dict:
+    return mock_net.get_dc_network_firewall_summary(dc_code, tr)
+
+
+def get_dc_network_load_balancer_summary(dc_code: str, tr: Optional[dict]) -> dict:
+    return mock_net.get_dc_network_load_balancer_summary(dc_code, tr)
 
 
 def get_dc_zabbix_storage_capacity(dc_code: str, tr: Optional[dict], host: Optional[str] = None) -> dict:

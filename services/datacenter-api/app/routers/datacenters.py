@@ -5,15 +5,22 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.time_filter import TimeFilter
-from app.models.schemas import DataCenterSummary
+from app.models.schemas import DataCenterSummary, JobStatsResponse
 from app.services.dc_service import DatabaseService
 from app.services import sla_service
+from app.db.queries import crm_potential as crm_q
+from app.services.dc_sales_potential_v2 import compute_dc_summary, compute_sales_potential_v2
+from app.services.webui_db import WebuiPool
 
 router = APIRouter()
 
 
 def get_db(request: Request) -> DatabaseService:
     return request.app.state.db
+
+
+def get_webui(request: Request) -> WebuiPool:
+    return request.app.state.webui
 
 
 @router.get("/datacenters/summary", response_model=List[DataCenterSummary])
@@ -41,6 +48,13 @@ def sla_availability(tf: TimeFilter = Depends()):
     return {"by_dc": by_dc}
 
 
+@router.get("/sla/datacenter-services", response_model=dict[str, Any])
+def sla_dc_services(tf: TimeFilter = Depends()):
+    """Datacenter-services SLA items from AuraNotify for the given time range."""
+    items = sla_service.get_dc_services_availability(tf.to_dict())
+    return {"items": items}
+
+
 @router.get("/datacenters/{dc_code}/s3/pools", response_model=dict[str, Any])
 def dc_s3_pools(
     dc_code: str,
@@ -63,6 +77,64 @@ def dc_zerto(dc_code: str, tf: TimeFilter = Depends(), db: DatabaseService = Dep
 @router.get("/datacenters/{dc_code}/backup/veeam", response_model=dict[str, Any])
 def dc_veeam(dc_code: str, tf: TimeFilter = Depends(), db: DatabaseService = Depends(get_db)):
     return db.get_dc_veeam_repos(dc_code, tf.to_dict())
+
+
+@router.get("/datacenters/{dc_code}/backup/veeam/jobs", response_model=JobStatsResponse)
+def dc_veeam_jobs(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    granularity: str = Query("day", description="day | week | month"),
+):
+    return db.get_dc_veeam_jobs(dc_code, tf.to_dict(), granularity)
+
+
+@router.get("/datacenters/{dc_code}/backup/zerto/jobs", response_model=JobStatsResponse)
+def dc_zerto_jobs(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    granularity: str = Query("day", description="day | week | month"),
+):
+    return db.get_dc_zerto_jobs(dc_code, tf.to_dict(), granularity)
+
+
+@router.get("/datacenters/{dc_code}/backup/netbackup/jobs", response_model=JobStatsResponse)
+def dc_netbackup_jobs(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    granularity: str = Query("day", description="day | week | month"),
+):
+    return db.get_dc_netbackup_jobs(dc_code, tf.to_dict(), granularity)
+
+
+@router.post("/datacenters/{dc_code}/backup/jobs/refresh")
+def dc_backup_jobs_refresh(
+    dc_code: str,
+    vendor: str = Query("all", description="veeam | zerto | netbackup | all"),
+):
+    """
+    Invalidate cached job statistics for one DC (single vendor or all three).
+
+    Used by the 'Yenile' button on the Backup & Replication panels so users can
+    force a live SQL re-run when they suspect data is stale. Returns the number
+    of cache keys deleted per vendor.
+    """
+    from app.core.cache_backend import cache_delete_prefix
+
+    vendors = ("veeam", "zerto", "netbackup") if vendor == "all" else (vendor,)
+    deleted: dict[str, str] = {}
+    for v in vendors:
+        if v not in ("veeam", "zerto", "netbackup"):
+            continue
+        prefix = f"dc_{v}_jobs:{dc_code}:"
+        cache_delete_prefix(prefix)
+        # Stale-while-revalidate snapshot'larını da temizle — kullanıcı 'Yenile'
+        # dediğinde gerçekten canlı SQL beklesin, eski snapshot dönmesin.
+        cache_delete_prefix(f"stale:{prefix}")
+        deleted[v] = "invalidated"
+    return {"status": "ok", "dc_code": dc_code, "deleted": deleted}
 
 
 @router.get("/datacenters/{dc_code}/clusters/classic", response_model=list[str])
@@ -97,18 +169,14 @@ def hyperconv_compute_filtered(
     return db.get_hyperconv_metrics_filtered(dc_code, selected, tf.to_dict())
 
 
-@router.get("/datacenters/{dc_code}/compute/power", response_model=dict[str, Any])
-def power_compute_filtered(
-    dc_code: str,
-    tf: TimeFilter = Depends(),
-    db: DatabaseService = Depends(get_db),
-    clusters: Optional[str] = Query(
-        None,
-        description="Optional CSV — ignored today; IBM Power pool is DC-wide.",
-    ),
-):
-    selected = [c.strip() for c in clusters.split(",") if c.strip()] if clusters else None
-    return db.get_power_metrics_filtered(dc_code, selected, tf.to_dict())
+@router.get("/datacenters/{dc_code}/racks", response_model=dict[str, Any])
+def dc_racks(dc_code: str, db: DatabaseService = Depends(get_db)):
+    return db.get_dc_racks(dc_code)
+
+
+@router.get("/datacenters/{dc_code}/racks/{rack_name}/devices", response_model=dict[str, Any])
+def rack_devices(dc_code: str, rack_name: str, db: DatabaseService = Depends(get_db)):
+    return db.get_rack_devices(rack_name)
 
 
 @router.get("/datacenters/{dc_code}/physical-inventory", response_model=dict[str, Any])
@@ -122,9 +190,13 @@ def phys_inv_overview_by_role(db: DatabaseService = Depends(get_db)):
 
 
 @router.get("/physical-inventory/customer", response_model=list[dict[str, Any]])
-def phys_inv_customer(db: DatabaseService = Depends(get_db)):
-    """Boyner tenant physical device list for Customer View."""
-    return db.get_physical_inventory_customer()
+def phys_inv_customer(
+    customer: str | None = None,
+    db: DatabaseService = Depends(get_db),
+    webui: WebuiPool = Depends(get_webui),
+):
+    """Customer-scoped physical device list for Customer View."""
+    return db.get_physical_inventory_customer(customer, webui=webui)
 
 
 @router.get("/physical-inventory/overview/manufacturer", response_model=list[dict[str, Any]])
@@ -183,8 +255,16 @@ def storage_performance(dc_code: str, tf: TimeFilter = Depends(), db: DatabaseSe
 
 
 @router.get("/datacenters/{dc_code}/network/filters", response_model=dict[str, Any])
-def network_filters(dc_code: str, tf: TimeFilter = Depends(), db: DatabaseService = Depends(get_db)):
-    return db.get_network_filters(dc_code, tf.to_dict())
+def network_filters(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    interface_scope: Optional[str] = Query(
+        None,
+        description="Interface scope: backbone, leaf, spine, management, router_uplink",
+    ),
+):
+    return db.get_network_filters(dc_code, tf.to_dict(), interface_scope=interface_scope)
 
 
 @router.get("/datacenters/{dc_code}/network/port-summary", response_model=dict[str, Any])
@@ -195,6 +275,10 @@ def network_port_summary(
     manufacturer: Optional[str] = Query(None),
     device_role: Optional[str] = Query(None),
     device_name: Optional[str] = Query(None),
+    interface_scope: Optional[str] = Query(
+        None,
+        description="Interface scope: backbone, leaf, spine, management, router_uplink",
+    ),
 ):
     return db.get_network_port_summary(
         dc_code,
@@ -202,6 +286,7 @@ def network_port_summary(
         manufacturer=manufacturer,
         device_role=device_role,
         device_name=device_name,
+        interface_scope=interface_scope,
     )
 
 
@@ -214,6 +299,10 @@ def network_95th_percentile(
     manufacturer: Optional[str] = Query(None),
     device_role: Optional[str] = Query(None),
     device_name: Optional[str] = Query(None),
+    interface_scope: Optional[str] = Query(
+        None,
+        description="Interface scope: backbone, leaf, spine, management, shared, router_uplink",
+    ),
 ):
     return db.get_network_95th_percentile(
         dc_code,
@@ -222,6 +311,7 @@ def network_95th_percentile(
         device_role=device_role,
         device_name=device_name,
         top_n=top_n,
+        interface_scope=interface_scope,
     )
 
 
@@ -236,6 +326,10 @@ def network_interface_table(
     manufacturer: Optional[str] = Query(None),
     device_role: Optional[str] = Query(None),
     device_name: Optional[str] = Query(None),
+    interface_scope: Optional[str] = Query(
+        None,
+        description="Interface scope: backbone, leaf, spine, management, shared, router_uplink",
+    ),
 ):
     return db.get_network_interface_table(
         dc_code,
@@ -246,7 +340,26 @@ def network_interface_table(
         page=page,
         page_size=page_size,
         search=search,
+        interface_scope=interface_scope,
     )
+
+
+@router.get("/datacenters/{dc_code}/network/firewall-summary", response_model=dict[str, Any])
+def network_firewall_summary(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+):
+    return db.get_network_firewall_summary(dc_code, tf.to_dict())
+
+
+@router.get("/datacenters/{dc_code}/network/load-balancer-summary", response_model=dict[str, Any])
+def network_load_balancer_summary(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+):
+    return db.get_network_load_balancer_summary(dc_code, tf.to_dict())
 
 
 @router.get("/datacenters/{dc_code}/zabbix-storage/capacity", response_model=dict[str, Any])
@@ -301,3 +414,75 @@ def zabbix_storage_disk_trend(
 @router.get("/datacenters/{dc_code}/zabbix-storage/disk-health", response_model=dict[str, Any])
 def zabbix_storage_disk_health(dc_code: str, tf: TimeFilter = Depends(), db: DatabaseService = Depends(get_db)):
     return db.get_zabbix_disk_health(dc_code, tf.to_dict())
+
+
+@router.get("/datacenters/{dc_code}/sales-potential", response_model=dict[str, Any])
+def dc_sales_potential(
+    dc_code: str,
+    db: DatabaseService = Depends(get_db),
+    webui: WebuiPool = Depends(get_webui),
+):
+    """
+    Sales potential for a datacenter (legacy v1): idle capacity × standard catalog unit prices.
+    Also returns YTD billing for customers present in this DC. Customer alias resolution
+    runs against the webui DB (gui_crm_customer_alias).
+    """
+    dc_pattern = f"%{dc_code}%"
+    try:
+        with db._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    crm_q.DC_SALES_POTENTIAL,
+                    (dc_pattern, dc_pattern, dc_pattern, dc_pattern, dc_code, dc_pattern, dc_pattern),
+                )
+                cols = [d[0] for d in cur.description]
+                detail_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+                # Resolve account ids for the DC via webui alias and run summary query
+                from app.services.dc_sales_potential_v2 import _resolve_account_ids_for_dc
+                account_ids = _resolve_account_ids_for_dc(cur, webui, dc_pattern)
+                summary = compute_dc_summary(cur, dc_code, account_ids)
+    except Exception:
+        detail_rows = []
+        summary = {}
+
+    return {
+        "dc_code": dc_code,
+        "summary": summary,
+        "catalog_detail": detail_rows,
+    }
+
+
+@router.get("/datacenters/{dc_code}/sales-potential/v2", response_model=dict[str, Any])
+def dc_sales_potential_v2(
+    dc_code: str,
+    db: DatabaseService = Depends(get_db),
+    webui: WebuiPool = Depends(get_webui),
+):
+    """
+    DEPRECATED in favour of customer-api ``/api/v1/crm/sellable-potential/by-panel?dc_code=...``
+    (see ADR-0014). The new pipeline uses gui_panel_definition + per-environment
+    resource ratios + unit conversions to deliver constrained sellable + TL
+    potential without coupling Nutanix-only capacity to every resource family.
+
+    The legacy v2 response shape is preserved for backward compatibility while
+    the GUI migrates to the inline Sellable Potential KPI blocks (Faz 6).
+
+    Realized-sales-based sellable headroom with Nutanix capacity proxy.
+    Sellable ceiling per resource type comes from gui_crm_threshold_config (webui-db).
+    See ADR-0010 / ADR-0012.
+    """
+    payload: dict[str, Any] = {"dc_code": dc_code}
+    try:
+        with db._get_connection() as conn:
+            with conn.cursor() as cur:
+                payload.update(compute_sales_potential_v2(cur, dc_code, webui=webui))
+                payload["dc_customer_summary"] = compute_dc_summary(
+                    cur, dc_code, payload.get("resolved_account_ids") or []
+                )
+    except Exception:
+        payload.setdefault("general_remaining_pct", 0.0)
+        payload.setdefault("per_resource", {})
+        payload.setdefault("per_category", [])
+        payload["dc_customer_summary"] = {}
+    return payload
