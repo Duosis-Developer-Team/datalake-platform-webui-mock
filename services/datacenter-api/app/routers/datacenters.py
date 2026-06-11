@@ -169,6 +169,79 @@ def hyperconv_compute_filtered(
     return db.get_hyperconv_metrics_filtered(dc_code, selected, tf.to_dict())
 
 
+# ---------------------------------------------------------------------------
+# Host-level compute mocks — mirror the live datacenter-api
+# /compute/{classic|hyperconverged}/hosts endpoints (host-based CRM calc).
+# Synthetic but deterministic rows derived from the cluster list so the GUI
+# Hosts panel and the host-based sellable path can be exercised against mocks.
+# ---------------------------------------------------------------------------
+
+
+def _mock_host_rows(clusters: list[str], selected: list[str] | None, *, hci: bool) -> dict:
+    scope = [c for c in clusters if (not selected or c in selected)]
+    hosts: list[dict[str, Any]] = []
+    for cluster in scope:
+        seed = sum(ord(ch) for ch in cluster)
+        for i in range(1, (seed % 3) + 4):  # 4-6 hosts per cluster
+            cpu_cap = 224.0
+            mem_cap = 2048.0
+            cpu_used = round(cpu_cap * (0.18 + ((seed + i * 13) % 40) / 100.0), 2)
+            mem_used = round(mem_cap * (0.30 + ((seed + i * 7) % 45) / 100.0), 2)
+            vcpu = 40 + ((seed + i * 11) % 120)
+            mem_alloc = round(mem_cap * (0.40 + ((seed + i * 5) % 35) / 100.0), 2)
+            ghz = 2.5
+            row: dict[str, Any] = {
+                "host": f"hv{i}{cluster.lower().replace('-', '')[:10]}",
+                "cluster": cluster,
+                "vm_count": 10 + ((seed + i * 3) % 60),
+                "cpu_cap_ghz": cpu_cap,
+                "cpu_used_ghz": cpu_used,
+                "cpu_used_pct": round(100.0 * cpu_used / cpu_cap, 1),
+                "cpu_alloc_ghz": float(vcpu),
+                "cpu_alloc_ghz_physical": round(float(vcpu) * ghz, 2),
+                "ghz_per_core": ghz,
+                "cpu_cap_cores": round(cpu_cap / ghz, 2),
+                "cpu_alloc_pct": round(100.0 * vcpu / cpu_cap, 1),
+                "mem_cap_gb": mem_cap,
+                "mem_used_gb": mem_used,
+                "mem_used_pct": round(100.0 * mem_used / mem_cap, 1),
+                "mem_alloc_gb": mem_alloc,
+                "mem_alloc_pct": round(100.0 * mem_alloc / mem_cap, 1),
+                "stor_provisioned_gb": round(4096.0 + (seed + i * 17) % 8192, 2),
+                "stor_used_gb": round(2048.0 + (seed + i * 19) % 4096, 2),
+            }
+            if hci:
+                row["stor_cap_gb"] = 40960.0
+                row["stor_used_host_gb"] = round(40960.0 * (0.25 + ((seed + i * 9) % 50) / 100.0), 2)
+            hosts.append(row)
+    hosts.sort(key=lambda h: (h["cluster"], h["host"]))
+    return {"hosts": hosts, "host_count": len(hosts)}
+
+
+@router.get("/datacenters/{dc_code}/compute/classic/hosts", response_model=dict[str, Any])
+def classic_compute_hosts(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    clusters: Optional[str] = Query(None, description="Comma-separated cluster names; empty = all"),
+):
+    selected = [c.strip() for c in clusters.split(",") if c.strip()] if clusters else None
+    cluster_list = db.get_classic_cluster_list(dc_code, tf.to_dict()) or []
+    return _mock_host_rows(cluster_list, selected, hci=False)
+
+
+@router.get("/datacenters/{dc_code}/compute/hyperconverged/hosts", response_model=dict[str, Any])
+def hyperconv_compute_hosts(
+    dc_code: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    clusters: Optional[str] = Query(None, description="Comma-separated cluster names; empty = all"),
+):
+    selected = [c.strip() for c in clusters.split(",") if c.strip()] if clusters else None
+    cluster_list = db.get_hyperconv_cluster_list(dc_code, tf.to_dict()) or []
+    return _mock_host_rows(cluster_list, selected, hci=True)
+
+
 @router.get("/datacenters/{dc_code}/racks", response_model=dict[str, Any])
 def dc_racks(dc_code: str, db: DatabaseService = Depends(get_db)):
     return db.get_dc_racks(dc_code)
