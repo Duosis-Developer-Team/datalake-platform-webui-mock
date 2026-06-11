@@ -213,6 +213,26 @@ def get_dc_network_interface_table(
     )
 
 
+def get_dc_network_interface_export(
+    dc_code: str,
+    tr: Optional[dict],
+    search: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    device_role: Optional[str] = None,
+    device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
+) -> dict:
+    return mock_net.get_dc_network_interface_export(
+        dc_code,
+        tr,
+        search,
+        manufacturer,
+        device_role,
+        device_name,
+        interface_scope,
+    )
+
+
 def get_dc_network_firewall_summary(dc_code: str, tr: Optional[dict]) -> dict:
     return mock_net.get_dc_network_firewall_summary(dc_code, tr)
 

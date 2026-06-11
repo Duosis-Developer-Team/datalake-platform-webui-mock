@@ -161,6 +161,35 @@ def get_dc_network_interface_table(
     }
 
 
+def get_dc_network_interface_export(
+    dc_code: str,
+    _tr: dict | None = None,
+    search: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+    device_role: Optional[str] = None,
+    device_name: Optional[str] = None,
+    interface_scope: Optional[str] = None,
+) -> dict[str, Any]:
+    """Full interface list for CSV export (mock: all rows, no pagination)."""
+    table = get_dc_network_interface_table(
+        dc_code,
+        _tr,
+        page=1,
+        page_size=5000,
+        search=search,
+        manufacturer=manufacturer,
+        device_role=device_role,
+        device_name=device_name,
+        interface_scope=interface_scope,
+    )
+    items = table.get("items") or []
+    return {
+        "items": items,
+        "total": table.get("total") or len(items),
+        "interface_scope": interface_scope or "overview",
+    }
+
+
 def get_dc_network_firewall_summary(dc_code: str, _tr: dict | None = None) -> dict[str, Any]:
     k = _norm(dc_code)
     if k not in MOCK_DC_CODES:
