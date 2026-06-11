@@ -22,6 +22,9 @@ from src.utils.format_units import (
     alloc_pct_float,
     title_case,
     parse_storage_string,
+    format_compact_decimal,
+    format_compact_money_tl,
+    format_full_decimal,
 )
 from src.utils.ibm_storage_capacity import (
     aggregate_ibm_storage_capacities,
@@ -2280,6 +2283,13 @@ def _network_interface_table_columns(interface_scope: str | None) -> list[dict]:
     ]
     if interface_scope == "backbone":
         cols[5]["name"] = "P95 Billable (Gbps)"
+        cols.extend(
+            [
+                {"name": "P95 Billable (Mbit)", "id": "p95_billable_mbit"},
+                {"name": "Unit Price (TL/Mbit)", "id": "unit_price_tl_per_mbit"},
+                {"name": "Est. Cost (TL)", "id": "estimated_cost_tl"},
+            ]
+        )
     return cols
 
 
@@ -2291,7 +2301,20 @@ def _network_bar_chart_title(interface_scope: str | None) -> str:
     return "Top 10 Interfaces — P95 Preview (Gbps)"
 
 
-def _network_table_section_titles(interface_scope: str | None, billing: bool) -> tuple[str, str]:
+def _network_table_section_titles(
+    interface_scope: str | None,
+    billing: bool,
+    billing_meta: dict | None = None,
+) -> tuple[str, str]:
+    if interface_scope == "backbone":
+        subtitle = "P95 billable bandwidth (RX+TX) with CRM unit pricing"
+        if billing_meta and billing_meta.get("has_price"):
+            product_name = billing_meta.get("product_name") or "Veri Merkezi Erişim ve L3 DDoS"
+            unit_price = float(billing_meta.get("unit_price_tl") or 0)
+            subtitle = f"{product_name} — {unit_price:,.2f} TL/Mbit"
+        elif billing_meta and not billing_meta.get("has_price"):
+            subtitle = "CRM unit price unavailable — cost columns empty"
+        return ("Billable Interface Table", subtitle)
     if billing:
         return (
             "Billable Interface Table",
@@ -2328,21 +2351,32 @@ def _firewall_aggregate_kpis(firewall_data: dict) -> tuple[int, int, int, int]:
     return len(devices), total_sessions, total_intrusions, ha_pairs
 
 
-def _interface_table_rows(items: list) -> list[dict]:
+def _interface_table_rows(items: list, interface_scope: str | None = None) -> list[dict]:
     rows = []
+    include_billing = interface_scope == "backbone"
     for it in items or []:
-        rows.append(
-            {
-                "host": it.get("host") or "",
-                "interface_name": it.get("interface_name") or "",
-                "interface_alias": it.get("interface_alias") or "",
-                "p95_rx_gbps": round(_bps_to_gbps(it.get("p95_rx_bps")), 3),
-                "p95_tx_gbps": round(_bps_to_gbps(it.get("p95_tx_bps")), 3),
-                "p95_total_gbps": round(_bps_to_gbps(it.get("p95_total_bps")), 3),
-                "speed_gbps": round(_bps_to_gbps(it.get("speed_bps")), 3),
-                "utilization_pct": round(float(it.get("utilization_pct") or 0), 2),
-            }
-        )
+        row = {
+            "host": it.get("host") or "",
+            "interface_name": it.get("interface_name") or "",
+            "interface_alias": it.get("interface_alias") or "",
+            "p95_rx_gbps": round(_bps_to_gbps(it.get("p95_rx_bps")), 3),
+            "p95_tx_gbps": round(_bps_to_gbps(it.get("p95_tx_bps")), 3),
+            "p95_total_gbps": round(_bps_to_gbps(it.get("p95_total_bps")), 3),
+            "speed_gbps": round(_bps_to_gbps(it.get("speed_bps")), 3),
+            "utilization_pct": round(float(it.get("utilization_pct") or 0), 2),
+        }
+        if include_billing:
+            mbit = it.get("p95_billable_mbit")
+            unit_price = it.get("unit_price_tl_per_mbit")
+            est_cost = it.get("estimated_cost_tl")
+            row["p95_billable_mbit"] = format_compact_decimal(mbit) if mbit is not None else "-"
+            row["unit_price_tl_per_mbit"] = (
+                format_full_decimal(unit_price, decimals=4) if unit_price is not None else "-"
+            )
+            row["estimated_cost_tl"] = (
+                format_compact_money_tl(est_cost) if est_cost is not None else "-"
+            )
+        rows.append(row)
     return rows
 
 
@@ -2359,7 +2393,11 @@ def _build_network_interface_page(
     interface_scope = flags["interface_scope"]
     billing = flags["billing"]
     kpi1, kpi2, kpi3, kpi4 = _network_kpi_labels(interface_scope)
-    table_title, table_subtitle = _network_table_section_titles(interface_scope, billing)
+    table_title, table_subtitle = _network_table_section_titles(
+        interface_scope,
+        billing,
+        (interface_table or {}).get("billing"),
+    )
 
     net_filters = net_filters or {}
     port_summary = port_summary or {}
@@ -2562,7 +2600,8 @@ def _build_network_interface_page(
                         page_size=page_size_init,
                         page_count=page_count_init,
                         page_action="custom",
-                        sort_action="native",
+                        sort_action="none",
+                        filter_action="none",
                         style_table={"overflowX": "auto", "marginTop": "6px"},
                         style_cell={
                             "padding": "10px 14px",
