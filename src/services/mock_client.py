@@ -423,6 +423,10 @@ def get_sellable_by_family(dc_code: str = "*") -> list[dict[str, Any]]:
     return mock_crm.sellable_by_family(dc_code)
 
 
+def get_crm_inventory_overview(dc_code: str = "*") -> dict[str, Any]:
+    return deepcopy(mock_crm.inventory_overview(dc_code))
+
+
 def get_metric_tags(prefix: Optional[str] = None, scope_type: str = "global", scope_id: str = "*") -> list[dict[str, Any]]:
     return mock_crm.metric_tags(prefix=prefix, scope_type=scope_type, scope_id=scope_id)
 

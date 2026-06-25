@@ -501,6 +501,115 @@ def sellable_by_family(dc_code: str = "*") -> list[dict[str, Any]]:
     return deepcopy(summary.get("families") or [])
 
 
+def inventory_overview(dc_code: str = "*") -> dict[str, Any]:
+    """Global CRM inventory overview fixture (capacity vs CRM sold vs used)."""
+    panels = [
+        {
+            "panel_key": "virt_hyperconverged_cpu",
+            "label": "HC CPU",
+            "family": "virt_hyperconverged",
+            "resource_kind": "cpu",
+            "display_unit": "vCPU",
+            "total": 10.0,
+            "crm_sold_qty": 8.0,
+            "crm_sold_tl": 12000.0,
+            "used_qty": 6.0,
+            "sellable_qty": 3.0,
+            "potential_tl": 4500.0,
+            "has_infra_source": True,
+            "has_price": True,
+            "status": "ok",
+            "delta_used_vs_crm": -2.0,
+            "overage_qty": 0.0,
+            "efficiency_pct": 75.0,
+        },
+        {
+            "panel_key": "virt_hyperconverged_ram",
+            "label": "HC RAM",
+            "family": "virt_hyperconverged",
+            "resource_kind": "ram",
+            "display_unit": "GB",
+            "total": 80.0,
+            "crm_sold_qty": 50.0,
+            "crm_sold_tl": 1000.0,
+            "used_qty": 55.0,
+            "sellable_qty": 24.0,
+            "potential_tl": 480.0,
+            "has_infra_source": True,
+            "has_price": True,
+            "status": "over",
+            "delta_used_vs_crm": 5.0,
+            "overage_qty": 5.0,
+            "efficiency_pct": 110.0,
+        },
+        {
+            "panel_key": "backup_veeam",
+            "label": "Veeam Backup",
+            "family": "backup_veeam",
+            "resource_kind": "other",
+            "display_unit": "Adet",
+            "total": None,
+            "crm_sold_qty": 25.0,
+            "crm_sold_tl": 5000.0,
+            "used_qty": None,
+            "sellable_qty": None,
+            "potential_tl": 0.0,
+            "has_infra_source": False,
+            "has_price": True,
+            "status": "crm_only",
+            "delta_used_vs_crm": None,
+            "overage_qty": 0.0,
+            "efficiency_pct": None,
+        },
+    ]
+    crm_only = [p for p in panels if p["status"] == "crm_only"]
+    fam = {
+        "family": "virt_hyperconverged",
+        "label": "Hyperconverged",
+        "dc_code": dc_code,
+        "crm_sold_by_kind": {"cpu": 8.0, "ram": 50.0},
+        "used_by_kind": {"cpu": 6.0, "ram": 55.0},
+        "sellable_by_kind": {"cpu": 3.0, "ram": 24.0},
+        "panels": panels[:2],
+    }
+    return {
+        "dc_code": dc_code,
+        "summary": {
+            "dc_code": dc_code,
+            "infra_panel_count": 2,
+            "panel_count": 3,
+            "crm_only_count": 1,
+            "crm_entitled_tl": 18000.0,
+            "unmapped_product_count": 2,
+            "unmapped_entitled_count": 1,
+            "overage_panel_count": 1,
+            "unsold_usage_count": 0,
+            "total_potential_tl": 4980.0,
+            "note": "Capacity units are heterogeneous across panels; compare quantities in the panel table.",
+        },
+        "families": [fam, {
+            "family": "backup_veeam",
+            "label": "Veeam Backup",
+            "dc_code": dc_code,
+            "crm_sold_by_kind": {"other": 25.0},
+            "used_by_kind": {},
+            "sellable_by_kind": {},
+            "panels": [panels[2]],
+        }],
+        "panels": panels,
+        "crm_only_panels": crm_only,
+        "unmapped_products": [
+            {
+                "productid": "unmapped-1",
+                "product_name": "Legacy SKU",
+                "resource_unit": "Adet",
+                "entitled_qty": 3.0,
+                "entitled_amount_tl": 300.0,
+            }
+        ],
+    }
+
+
 def metric_tags(prefix: Optional[str] = None, scope_type: str = "global", scope_id: str = "*") -> list[dict[str, Any]]:
     rows = [
         {

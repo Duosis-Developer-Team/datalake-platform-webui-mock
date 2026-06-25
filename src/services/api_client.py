@@ -1387,6 +1387,18 @@ def get_sellable_summary(dc_code: str = "*") -> dict[str, Any]:
         return {}
 
 
+def get_crm_inventory_overview(dc_code: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_inventory_overview(dc_code)
+    try:
+        data = _get_json(_client_cust, f"/api/v1/crm/inventory-overview?dc_code={quote(dc_code, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
 def get_sellable_by_panel(dc_code: str = "*", family: Optional[str] = None) -> list:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
