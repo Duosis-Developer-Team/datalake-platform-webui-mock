@@ -555,6 +555,31 @@ def inventory_overview(dc_code: str = "*") -> dict[str, Any]:
             "computation_mode": "host_based",
         },
         {
+            "panel_key": "backup_netbackup_storage",
+            "label": "NetBackup — Storage",
+            "service_label": "NetBackup — Storage",
+            "family": "backup_netbackup",
+            "family_label": "NetBackup",
+            "resource_kind": "storage",
+            "display_unit": "GB",
+            "total": 12000.0,
+            "crm_sold_qty": 800.0,
+            "crm_sold_tl": 184000.0,
+            "used_qty": 4500.0,
+            "free_qty": 7500.0,
+            "sellable_qty": 5100.0,
+            "potential_tl": 1173000.0,
+            "has_infra_source": True,
+            "has_price": True,
+            "infra_binding": "bound",
+            "status": "ok",
+            "delta_used_vs_crm": 3700.0,
+            "overage_qty": 3700.0,
+            "efficiency_pct": 562.5,
+            "crm_products_summary": "NetBackup Storage SKU",
+            "computation_mode": "aggregated",
+        },
+        {
             "panel_key": "backup_veeam",
             "label": "Veeam Cloud Connect Backup",
             "service_label": "Veeam Cloud Connect Backup",
@@ -581,7 +606,7 @@ def inventory_overview(dc_code: str = "*") -> dict[str, Any]:
         },
     ]
     crm_only = [p for p in panels if p["infra_binding"] == "crm_only"]
-    fam = {
+    fam_hc = {
         "family": "virt_hyperconverged",
         "label": "Hyperconverged",
         "family_label": "Hyperconverged",
@@ -590,12 +615,21 @@ def inventory_overview(dc_code: str = "*") -> dict[str, Any]:
         "panel_count": 2,
         "panels": panels[:2],
     }
+    fam_nb = {
+        "family": "backup_netbackup",
+        "label": "NetBackup",
+        "family_label": "NetBackup",
+        "dc_code": dc_code,
+        "has_infra": True,
+        "panel_count": 1,
+        "panels": [panels[2]],
+    }
     return {
         "dc_code": dc_code,
         "summary": {
             "dc_code": dc_code,
-            "infra_panel_count": 2,
-            "panel_count": 3,
+            "infra_panel_count": 3,
+            "panel_count": 4,
             "crm_only_count": 1,
             "crm_entitled_tl": 18000.0,
             "unmapped_product_count": 2,
@@ -606,13 +640,14 @@ def inventory_overview(dc_code: str = "*") -> dict[str, Any]:
             "note": (
                 "Capacity units are heterogeneous across panels; compare quantities in the service list."
                 + (
-                    " Global view sums infra metrics across all DCs with configured bindings."
+                    " Global view sums DC-scoped infra totals across bound DCs, then "
+                    "recomputes sellable per family; global-only panels are counted once."
                     if dc_code in (None, "", "*")
                     else ""
                 )
             ),
         },
-        "families": [fam],
+        "families": [fam_hc, fam_nb],
         "panels": panels,
         "crm_only_panels": crm_only,
         "unmapped_products": [
