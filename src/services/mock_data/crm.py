@@ -603,7 +603,14 @@ def inventory_overview(dc_code: str = "*") -> dict[str, Any]:
             "overage_panel_count": 1,
             "unsold_usage_count": 0,
             "total_potential_tl": 4980.0,
-            "note": "Capacity units are heterogeneous across panels; compare quantities in the service list.",
+            "note": (
+                "Capacity units are heterogeneous across panels; compare quantities in the service list."
+                + (
+                    " Global view sums infra metrics across all DCs with configured bindings."
+                    if dc_code in (None, "", "*")
+                    else ""
+                )
+            ),
         },
         "families": [fam],
         "panels": panels,
