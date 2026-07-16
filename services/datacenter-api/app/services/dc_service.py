@@ -3066,6 +3066,28 @@ JOIN latest l ON s.storage_ip = l.storage_ip AND s."timestamp" = l.max_ts
         cache.set(cache_key, result)
         return result
 
+    def get_dc_zerto_license(self, dc_code: str) -> dict:
+        """Return mock-compatible Zerto license payload for a DC."""
+        try:
+            from src.services.mock_data import backup as mock_backup
+
+            return mock_backup.get_dc_zerto_license(dc_code)
+        except Exception:
+            return {
+                "has_license": False,
+                "licenses": [],
+                "sites": [],
+                "summary": {
+                    "license_type": None,
+                    "is_valid": None,
+                    "max_vms": None,
+                    "total_vms_count": None,
+                    "days_until_expiry": None,
+                    "protected_vms_in_dc": 0,
+                    "zerto_hosts": [],
+                },
+            }
+
     def get_dc_veeam_repos(self, dc_code: str, time_range: dict | None = None) -> dict:
         """Return cached Veeam repository states for a DC and time range."""
         tr = time_range or default_time_range()

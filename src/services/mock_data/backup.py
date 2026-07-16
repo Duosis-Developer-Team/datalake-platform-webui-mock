@@ -101,3 +101,52 @@ def get_dc_zerto_sites(dc_code: str, _tr: dict | None = None) -> dict[str, Any]:
 
 def get_dc_veeam_repos(dc_code: str, _tr: dict | None = None) -> dict[str, Any]:
     return deepcopy(_VEEAM.get(_norm(dc_code), {"repos": [], "rows": []}))
+
+
+_ZERTO_LICENSE: dict[str, dict[str, Any]] = {
+    "IST-DC1": {
+        "has_license": True,
+        "licenses": [
+            {
+                "zerto_host": "10.40.9.11",
+                "license_type": "CloudO2M",
+                "is_valid": True,
+                "max_vms": 500,
+                "total_vms_count": 115,
+                "days_until_expiry": 180,
+            }
+        ],
+        "sites": [
+            {"site_name": "IST-ZR-PRIMARY", "protected_vms_count": 240},
+            {"site_name": "IST-ZR-SECONDARY", "protected_vms_count": 160},
+        ],
+        "summary": {
+            "license_type": "CloudO2M",
+            "is_valid": True,
+            "max_vms": 500,
+            "total_vms_count": 115,
+            "days_until_expiry": 180,
+            "protected_vms_in_dc": 400,
+            "zerto_hosts": ["10.40.9.11"],
+        },
+    },
+}
+
+
+def get_dc_zerto_license(dc_code: str) -> dict[str, Any]:
+    """Mock Zerto license payload (policy-based Backup & Replication IA)."""
+    empty = {
+        "has_license": False,
+        "licenses": [],
+        "sites": [],
+        "summary": {
+            "license_type": None,
+            "is_valid": None,
+            "max_vms": None,
+            "total_vms_count": None,
+            "days_until_expiry": None,
+            "protected_vms_in_dc": 0,
+            "zerto_hosts": [],
+        },
+    }
+    return deepcopy(_ZERTO_LICENSE.get(_norm(dc_code), empty))

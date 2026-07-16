@@ -461,6 +461,19 @@ def get_dc_zerto_sites(dc_code: str, tr: Optional[dict]) -> dict:
         return {"sites": [], "rows": []}
 
 
+def get_dc_zerto_license(dc_code: str) -> dict:
+    if _is_mock_mode():
+        from src.services.mock_data import backup as mock_backup
+
+        return mock_backup.get_dc_zerto_license(dc_code)
+    try:
+        enc = quote(dc_code, safe="")
+        data = _get_json(_client_dc, f"/api/v1/datacenters/{enc}/backup/zerto/license")
+        return data if isinstance(data, dict) else {"has_license": False, "licenses": [], "sites": [], "summary": {}}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {"has_license": False, "licenses": [], "sites": [], "summary": {}}
+
+
 def get_dc_veeam_repos(dc_code: str, tr: Optional[dict]) -> dict:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
