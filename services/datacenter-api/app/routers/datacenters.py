@@ -100,6 +100,57 @@ def dc_veeam_jobs(
     return db.get_dc_veeam_jobs(dc_code, tf.to_dict(), granularity)
 
 
+@router.get("/datacenters/{dc_code}/backup/{vendor}/unique-jobs", response_model=dict[str, Any])
+def dc_unique_jobs(
+    dc_code: str,
+    vendor: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+):
+    from src.services.mock_data import backup as mock_backup
+
+    if hasattr(db, "get_dc_unique_jobs"):
+        return db.get_dc_unique_jobs(dc_code, vendor, tf.to_dict())
+    return mock_backup.get_dc_unique_jobs(dc_code, vendor, tf.to_dict())
+
+
+@router.get("/datacenters/{dc_code}/backup/{vendor}/unique-jobs/table", response_model=dict[str, Any])
+def dc_unique_jobs_table(
+    dc_code: str,
+    vendor: str,
+    tf: TimeFilter = Depends(),
+    db: DatabaseService = Depends(get_db),
+    page: int = Query(1),
+    page_size: int = Query(50),
+    search: str = Query(""),
+    status: Optional[str] = Query(None),
+    type: Optional[str] = Query(None),
+    policy_type: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    platform: Optional[str] = Query(None),
+):
+    from src.services.mock_data import backup as mock_backup
+
+    def _split(v: Optional[str]) -> list[str] | None:
+        if not v:
+            return None
+        return [x.strip() for x in v.split(",") if x.strip()]
+
+    kwargs = dict(
+        page=page,
+        page_size=page_size,
+        search=search,
+        statuses=_split(status),
+        types=_split(type),
+        policy_types=_split(policy_type),
+        categories=_split(category),
+        platforms=_split(platform),
+    )
+    if hasattr(db, "get_dc_unique_jobs_table"):
+        return db.get_dc_unique_jobs_table(dc_code, vendor, tf.to_dict(), **kwargs)
+    return mock_backup.get_dc_unique_jobs_table(dc_code, vendor, tf.to_dict(), **kwargs)
+
+
 @router.get("/datacenters/{dc_code}/backup/zerto/jobs", response_model=JobStatsResponse)
 def dc_zerto_jobs(
     dc_code: str,
