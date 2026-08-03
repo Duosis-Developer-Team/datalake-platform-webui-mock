@@ -115,6 +115,8 @@ def _customer_bundle(
             "memory_gb": classic_mem,
             "disk_gb": classic_disk,
             "vm_list": classic_list,
+            "replica_vm_list": [],
+            "replica_vm_count": 0,
         },
         "hyperconv": {
             "vm_count": hc_vm,
@@ -124,6 +126,8 @@ def _customer_bundle(
             "memory_gb": hc_mem,
             "disk_gb": hc_disk,
             "vm_list": hc_list,
+            "replica_vm_list": [],
+            "replica_vm_count": 0,
         },
         "pure_nutanix": (
             {
