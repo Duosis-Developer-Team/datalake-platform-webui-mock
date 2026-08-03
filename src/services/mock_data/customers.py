@@ -80,6 +80,13 @@ def _customer_bundle(
             "netbackup_pre_dedup_gib": nb_pre,
             "netbackup_post_dedup_gib": nb_post,
             "zerto_provisioned_gib": zerto_prov_gib,
+            "replication_resources": {
+                "veeam_dr": {"vm_count": 0, "cpu": 0.0, "memory_gb": 0.0, "disk_gb": 0.0},
+                "zerto": {"vm_count": 0, "cpu": 0.0, "memory_gb": 0.0, "disk_gb": 0.0},
+                "altra_replica": {"vm_count": 0, "cpu": 0.0, "memory_gb": 0.0, "disk_gb": 0.0},
+                "custom": {"vm_count": 0, "cpu": 0.0, "memory_gb": 0.0, "disk_gb": 0.0},
+                "totals": {"vm_count": 0, "cpu": 0.0, "memory_gb": 0.0, "disk_gb": 0.0},
+            },
         },
     }
 
