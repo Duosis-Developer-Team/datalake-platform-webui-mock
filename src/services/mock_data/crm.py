@@ -6,7 +6,10 @@ These datasets intentionally mirror the FastAPI response shapes used by `custome
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -44,6 +47,41 @@ _CALC_CONFIG: dict[str, dict[str, Any]] = {
         "value_type": "float",
         "description": "Above this ratio, efficiency is considered over-utilized.",
         "updated_by": "mock",
+    },
+    "usage_basis": {
+        "config_key": "usage_basis",
+        "config_value": "max",
+        "value_type": "enum",
+        "description": "Sellable usage basis: max / avg / cur.",
+        "updated_by": "seed",
+    },
+    "upsell_enabled": {
+        "config_key": "upsell_enabled",
+        "config_value": "false",
+        "value_type": "bool",
+        "description": "Platform default for upsell. false = new-sale TL only.",
+        "updated_by": "seed",
+    },
+    "replication_provider": {
+        "config_key": "replication_provider",
+        "config_value": "veeam",
+        "value_type": "enum",
+        "description": "Exclusive replication product: veeam or zerto.",
+        "updated_by": "seed",
+    },
+    "waflb_appliance": {
+        "config_key": "waflb_appliance",
+        "config_value": "5g",
+        "value_type": "enum",
+        "description": "WAF/LB appliance size: 5g / 1g / 200m.",
+        "updated_by": "seed",
+    },
+    "waflb_distribute": {
+        "config_key": "waflb_distribute",
+        "config_value": "false",
+        "value_type": "bool",
+        "description": "When true, WAF/LB units are distributed across DCs.",
+        "updated_by": "seed",
     },
 }
 
@@ -1726,6 +1764,400 @@ def _parse_gpu_csv(text: str) -> dict[str, Any]:
             }
         )
     return {"errors": errors, "rows": rows}
+
+
+# ---------------------------------------------------------------------------
+# Sales parameters + scenarios (W1 + W6) — GUI crm-engine /crm/config/sales-*
+# ---------------------------------------------------------------------------
+
+_USAGE_BASIS_VALUES = frozenset({"max", "avg", "cur"})
+_REPLICATION_PROVIDERS = frozenset({"veeam", "zerto"})
+_WAFLB_APPLIANCES = frozenset({"5g", "1g", "200m"})
+_SCOPE_KINDS = frozenset({"panel", "family", "line"})
+_DISCOUNT_KINDS = frozenset({"new_sale", "upsell"})
+_BUILTIN_SCENARIO_KEYS = frozenset({"S1", "S2", "S3", "S4"})
+_SCENARIO_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+_SALES_CALC_TYPES = {
+    "usage_basis": "enum",
+    "upsell_enabled": "bool",
+    "replication_provider": "enum",
+    "waflb_appliance": "enum",
+    "waflb_distribute": "bool",
+}
+_GAP_PAYLOAD = {"replication_share": None, "ibm_ambiguous_disk_share": None}
+_FAMILY_DISCOUNT_KEYS = (
+    "virt_km",
+    "virt_hyperconverged",
+    "virt_power",
+    "backup_veeam_replication",
+    "backup_zerto_replication",
+)
+
+
+def _discount_row(scope_kind: str, scope_key: str, kind: str, ratio: float = 0.0, updated_by: str = "seed") -> dict[str, Any]:
+    return {
+        "scope_kind": scope_kind,
+        "scope_key": scope_key,
+        "kind": kind,
+        "ratio": float(ratio),
+        "updated_by": updated_by,
+        "updated_at": "2026-08-23T09:00:00+00:00",
+    }
+
+
+_DISCOUNT_SEED: list[dict[str, Any]] = [
+    _discount_row("family", fam, kind)
+    for fam in _FAMILY_DISCOUNT_KEYS
+    for kind in ("new_sale", "upsell")
+]
+
+
+def _scenario_seed_row(key: str, sort_order: int) -> dict[str, Any]:
+    return {
+        "scenario_key": key,
+        "label": key,
+        "payload": deepcopy(_GAP_PAYLOAD),
+        "is_builtin": True,
+        "sort_order": sort_order,
+        "created_by": "seed",
+        "created_at": "2026-08-23T09:00:00+00:00",
+    }
+
+
+_SCENARIO_SEED: list[dict[str, Any]] = [
+    _scenario_seed_row("S1", 10),
+    _scenario_seed_row("S2", 20),
+    _scenario_seed_row("S3", 30),
+    _scenario_seed_row("S4", 40),
+]
+
+_DISCOUNTS: list[dict[str, Any]] = deepcopy(_DISCOUNT_SEED)
+_SCENARIOS: dict[str, dict[str, Any]] = {r["scenario_key"]: deepcopy(r) for r in _SCENARIO_SEED}
+_THRESHOLDS_SEED = deepcopy(_THRESHOLDS)
+_RESOURCE_RATIOS_SEED = deepcopy(_RESOURCE_RATIOS)
+_CALC_CONFIG_SEED = deepcopy(_CALC_CONFIG)
+_THRESH_ID_SEQ_SEED = 3
+
+
+def reset_sales_config() -> None:
+    """Test helper: restore W1 calc keys, discounts, scenarios, thresholds, ratios."""
+    global _DISCOUNTS, _SCENARIOS, _THRESHOLDS, _RESOURCE_RATIOS, _THRESH_ID_SEQ, _CALC_CONFIG
+    _DISCOUNTS = deepcopy(_DISCOUNT_SEED)
+    _SCENARIOS = {r["scenario_key"]: deepcopy(r) for r in _SCENARIO_SEED}
+    _THRESHOLDS = deepcopy(_THRESHOLDS_SEED)
+    _RESOURCE_RATIOS = deepcopy(_RESOURCE_RATIOS_SEED)
+    _CALC_CONFIG = deepcopy(_CALC_CONFIG_SEED)
+    _THRESH_ID_SEQ = _THRESH_ID_SEQ_SEED
+
+
+def _as_bool(raw: Any) -> bool:
+    return str(raw).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _sales_calc_dict() -> dict[str, Any]:
+    def _val(key: str, default: str) -> str:
+        row = _CALC_CONFIG.get(key) or {}
+        return str(row.get("config_value", default))
+
+    return {
+        "usage_basis": _val("usage_basis", "max"),
+        "upsell_enabled": _as_bool(_val("upsell_enabled", "false")),
+        "replication_provider": _val("replication_provider", "veeam"),
+        "waflb_appliance": _val("waflb_appliance", "5g"),
+        "waflb_distribute": _as_bool(_val("waflb_distribute", "false")),
+    }
+
+
+def _sales_etag() -> str:
+    blob = json.dumps(
+        {
+            "calc": _sales_calc_dict(),
+            "discounts": _DISCOUNTS,
+            "thresholds": _THRESHOLDS,
+            "ratios": _RESOURCE_RATIOS,
+        },
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    )
+    return hashlib.blake2s(blob.encode("utf-8"), digest_size=4).hexdigest()
+
+
+def list_sales_discounts() -> list[dict[str, Any]]:
+    return deepcopy(_DISCOUNTS)
+
+
+def get_sales_parameters() -> dict[str, Any]:
+    return {
+        "calc": _sales_calc_dict(),
+        "thresholds": deepcopy(_THRESHOLDS),
+        "ratios": deepcopy(_RESOURCE_RATIOS),
+        "discounts": deepcopy(_DISCOUNTS),
+        "etag": _sales_etag(),
+    }
+
+
+def put_sales_calc(
+    *,
+    usage_basis: Optional[str] = None,
+    upsell_enabled: Optional[bool] = None,
+    replication_provider: Optional[str] = None,
+    waflb_appliance: Optional[str] = None,
+    waflb_distribute: Optional[bool] = None,
+) -> dict[str, Any]:
+    updated: list[str] = []
+    pairs: list[tuple[str, str]] = []
+    if usage_basis is not None:
+        if usage_basis not in _USAGE_BASIS_VALUES:
+            raise ValueError("usage_basis must be max/avg/cur")
+        pairs.append(("usage_basis", usage_basis))
+    if upsell_enabled is not None:
+        pairs.append(("upsell_enabled", "true" if upsell_enabled else "false"))
+    if replication_provider is not None:
+        if replication_provider not in _REPLICATION_PROVIDERS:
+            raise ValueError("replication_provider must be veeam or zerto")
+        pairs.append(("replication_provider", replication_provider))
+    if waflb_appliance is not None:
+        if waflb_appliance not in _WAFLB_APPLIANCES:
+            raise ValueError("waflb_appliance must be 5g/1g/200m")
+        pairs.append(("waflb_appliance", waflb_appliance))
+    if waflb_distribute is not None:
+        pairs.append(("waflb_distribute", "true" if waflb_distribute else "false"))
+    for key, value in pairs:
+        upsert_calc_config(
+            config_key=key,
+            config_value=value,
+            value_type=_SALES_CALC_TYPES[key],
+            description=None,
+        )
+        updated.append(key)
+    return {"status": "ok", "updated": updated, "sales_defaults_deleted": 0}
+
+
+def put_sales_discount(
+    *,
+    scope_kind: str,
+    scope_key: str,
+    kind: str,
+    ratio: float,
+) -> dict[str, Any]:
+    if scope_kind not in _SCOPE_KINDS:
+        raise ValueError("scope_kind must be panel/family/line")
+    if kind not in _DISCOUNT_KINDS:
+        raise ValueError("kind must be new_sale or upsell")
+    if ratio < 0 or ratio >= 1:
+        raise ValueError("ratio must be >= 0 and < 1")
+    key = str(scope_key or "").strip()
+    if not key:
+        raise ValueError("scope_key is required")
+    stamp = _iso_now()
+    for row in _DISCOUNTS:
+        if row["scope_kind"] == scope_kind and row["scope_key"] == key and row["kind"] == kind:
+            row["ratio"] = float(ratio)
+            row["updated_by"] = "mock"
+            row["updated_at"] = stamp
+            return {"status": "ok", "sales_defaults_deleted": 0}
+    _DISCOUNTS.append(
+        _discount_row(scope_kind, key, kind, float(ratio), updated_by="mock")
+    )
+    _DISCOUNTS[-1]["updated_at"] = stamp
+    return {"status": "ok", "sales_defaults_deleted": 0}
+
+
+def put_sales_threshold(
+    *,
+    resource_type: str,
+    dc_code: str,
+    sellable_limit_pct: float,
+    notes: Optional[str] = None,
+    panel_key: Optional[str] = None,
+) -> dict[str, Any]:
+    if sellable_limit_pct < 0 or sellable_limit_pct > 100:
+        raise ValueError("sellable_limit_pct must be between 0 and 100")
+    upsert_threshold(
+        resource_type=resource_type,
+        dc_code=dc_code or "*",
+        sellable_limit_pct=sellable_limit_pct,
+        notes=notes,
+        panel_key=panel_key,
+    )
+    return {"status": "ok", "sales_defaults_deleted": 0}
+
+
+def put_sales_ratio(
+    family: str,
+    *,
+    dc_code: str = "*",
+    cpu_per_unit: float = 1.0,
+    ram_gb_per_unit: float = 8.0,
+    storage_gb_per_unit: float = 100.0,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if cpu_per_unit <= 0 or ram_gb_per_unit <= 0 or storage_gb_per_unit <= 0:
+        raise ValueError("ratios must be > 0")
+    fam = str(family or "").strip()
+    if not fam:
+        raise ValueError("family is required")
+    dc = (dc_code or "*").strip() or "*"
+    stamp = _iso_now()
+    for row in _RESOURCE_RATIOS:
+        if row["family"] == fam and row["dc_code"] == dc:
+            row["cpu_per_unit"] = float(cpu_per_unit)
+            row["ram_gb_per_unit"] = float(ram_gb_per_unit)
+            row["storage_gb_per_unit"] = float(storage_gb_per_unit)
+            row["notes"] = notes
+            row["updated_by"] = "mock"
+            row["updated_at"] = stamp
+            return {"status": "ok", "family": fam, "sales_defaults_deleted": 0}
+    _RESOURCE_RATIOS.append(
+        {
+            "family": fam,
+            "dc_code": dc,
+            "cpu_per_unit": float(cpu_per_unit),
+            "ram_gb_per_unit": float(ram_gb_per_unit),
+            "storage_gb_per_unit": float(storage_gb_per_unit),
+            "notes": notes,
+            "updated_by": "mock",
+            "updated_at": stamp,
+        }
+    )
+    return {"status": "ok", "family": fam, "sales_defaults_deleted": 0}
+
+
+def _scenario_public(row: dict[str, Any]) -> dict[str, Any]:
+    return deepcopy(row)
+
+
+def list_sales_scenarios() -> list[dict[str, Any]]:
+    rows = [_scenario_public(r) for r in _SCENARIOS.values()]
+    rows.sort(key=lambda r: (int(r.get("sort_order") or 100), str(r.get("scenario_key") or "")))
+    return rows
+
+
+def _is_builtin_scenario(key: str, row: Optional[dict[str, Any]] = None) -> bool:
+    if key in _BUILTIN_SCENARIO_KEYS:
+        return True
+    return bool(row and row.get("is_builtin"))
+
+
+def _validate_scenario_key(key: str, *, allow_builtin: bool = False) -> str:
+    cleaned = str(key or "").strip()
+    if not cleaned or not _SCENARIO_KEY_RE.match(cleaned):
+        raise ValueError("scenario_key must be 1–32 chars [A-Za-z][A-Za-z0-9_-]*")
+    if not allow_builtin and cleaned in _BUILTIN_SCENARIO_KEYS:
+        raise ValueError(f"{cleaned} is reserved for builtin S1–S4")
+    return cleaned
+
+
+def _parse_scenario_payload(payload: Any) -> dict[str, Any]:
+    if payload is None:
+        return {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("payload must be valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be a JSON object")
+    return dict(payload)
+
+
+def create_sales_scenario(
+    *,
+    scenario_key: str,
+    label: str,
+    payload: Optional[dict[str, Any]] = None,
+    sort_order: int = 100,
+    created_by: str = "mock",
+) -> dict[str, Any]:
+    key = _validate_scenario_key(scenario_key)
+    if key in _SCENARIOS:
+        raise ValueError(f"{key} already exists")
+    body = _parse_scenario_payload(payload)
+    title = (label or key).strip() or key
+    row = {
+        "scenario_key": key,
+        "label": title,
+        "payload": body,
+        "is_builtin": False,
+        "sort_order": int(sort_order or 100),
+        "created_by": created_by,
+        "created_at": _iso_now(),
+    }
+    _SCENARIOS[key] = row
+    return _scenario_public(row)
+
+
+def update_sales_scenario(
+    scenario_key: str,
+    *,
+    label: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+    sort_order: Optional[int] = None,
+) -> dict[str, Any]:
+    key = str(scenario_key or "").strip()
+    row = _SCENARIOS.get(key)
+    if not row:
+        raise ValueError(f"unknown scenario {key}")
+    if _is_builtin_scenario(key, row):
+        raise ValueError(f"{key} is builtin and cannot be changed")
+    if label is not None:
+        row["label"] = (label or row["label"]).strip() or row["label"]
+    if payload is not None:
+        row["payload"] = _parse_scenario_payload(payload)
+    if sort_order is not None:
+        row["sort_order"] = int(sort_order)
+    return _scenario_public(row)
+
+
+def delete_sales_scenario(scenario_key: str) -> dict[str, Any]:
+    key = str(scenario_key or "").strip()
+    row = _SCENARIOS.get(key)
+    if not row:
+        raise ValueError(f"unknown scenario {key}")
+    if _is_builtin_scenario(key, row):
+        raise ValueError(f"{key} is builtin and cannot be deleted")
+    del _SCENARIOS[key]
+    return {"status": "ok", "scenario_key": key}
+
+
+def _suggest_copy_key(source_key: str) -> str:
+    taken = set(_SCENARIOS)
+    candidate = f"{source_key}_copy"
+    if candidate not in taken:
+        return candidate
+    n = 2
+    while f"{source_key}_copy_{n}" in taken:
+        n += 1
+    return f"{source_key}_copy_{n}"
+
+
+def copy_sales_scenario(
+    scenario_key: str,
+    *,
+    new_key: Optional[str] = None,
+    label: Optional[str] = None,
+    created_by: str = "mock",
+) -> dict[str, Any]:
+    src_key = str(scenario_key or "").strip()
+    src = _SCENARIOS.get(src_key)
+    if not src:
+        raise ValueError(f"unknown scenario {src_key}")
+    dest = _validate_scenario_key(new_key) if new_key else _validate_scenario_key(_suggest_copy_key(src_key))
+    if dest in _SCENARIOS:
+        raise ValueError(f"{dest} already exists")
+    src_label = str(src.get("label") or src_key)
+    row = {
+        "scenario_key": dest,
+        "label": (label or f"{src_label} (copy)").strip() or f"{src_label} (copy)",
+        "payload": deepcopy(src.get("payload") or {}),
+        "is_builtin": False,
+        "sort_order": int(src.get("sort_order") or 100),
+        "created_by": created_by,
+        "created_at": _iso_now(),
+    }
+    _SCENARIOS[dest] = row
+    return _scenario_public(row)
 
 
 def customer_sales_summary(_customer_name: str) -> dict[str, Any]:

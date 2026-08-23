@@ -395,6 +395,129 @@ def get_static_capacity_template(dataset: str) -> str:
     return mock_crm.static_capacity_template(dataset)
 
 
+def get_sales_parameters() -> dict[str, Any]:
+    return mock_crm.get_sales_parameters()
+
+
+def put_sales_calc(
+    *,
+    usage_basis: Optional[str] = None,
+    upsell_enabled: Optional[bool] = None,
+    replication_provider: Optional[str] = None,
+    waflb_appliance: Optional[str] = None,
+    waflb_distribute: Optional[bool] = None,
+) -> dict[str, Any]:
+    return mock_crm.put_sales_calc(
+        usage_basis=usage_basis,
+        upsell_enabled=upsell_enabled,
+        replication_provider=replication_provider,
+        waflb_appliance=waflb_appliance,
+        waflb_distribute=waflb_distribute,
+    )
+
+
+def put_sales_discount(
+    *,
+    scope_kind: str,
+    scope_key: str,
+    kind: str,
+    ratio: float,
+) -> dict[str, Any]:
+    return mock_crm.put_sales_discount(
+        scope_kind=scope_kind,
+        scope_key=scope_key,
+        kind=kind,
+        ratio=ratio,
+    )
+
+
+def put_sales_threshold(
+    *,
+    resource_type: str,
+    dc_code: str,
+    sellable_limit_pct: float,
+    notes: Optional[str] = None,
+    panel_key: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.put_sales_threshold(
+        resource_type=resource_type,
+        dc_code=dc_code,
+        sellable_limit_pct=sellable_limit_pct,
+        notes=notes,
+        panel_key=panel_key,
+    )
+
+
+def put_sales_ratio(
+    family: str,
+    *,
+    dc_code: str = "*",
+    cpu_per_unit: float = 1.0,
+    ram_gb_per_unit: float = 8.0,
+    storage_gb_per_unit: float = 100.0,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.put_sales_ratio(
+        family,
+        dc_code=dc_code,
+        cpu_per_unit=cpu_per_unit,
+        ram_gb_per_unit=ram_gb_per_unit,
+        storage_gb_per_unit=storage_gb_per_unit,
+        notes=notes,
+    )
+
+
+def list_sales_scenarios() -> list[dict[str, Any]]:
+    return mock_crm.list_sales_scenarios()
+
+
+def create_sales_scenario(
+    *,
+    scenario_key: str,
+    label: str,
+    payload: Optional[dict[str, Any]] = None,
+    sort_order: int = 100,
+) -> dict[str, Any]:
+    return mock_crm.create_sales_scenario(
+        scenario_key=scenario_key,
+        label=label,
+        payload=payload,
+        sort_order=sort_order,
+    )
+
+
+def update_sales_scenario(
+    scenario_key: str,
+    *,
+    label: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+    sort_order: Optional[int] = None,
+) -> dict[str, Any]:
+    return mock_crm.update_sales_scenario(
+        scenario_key,
+        label=label,
+        payload=payload,
+        sort_order=sort_order,
+    )
+
+
+def delete_sales_scenario(scenario_key: str) -> dict[str, Any]:
+    return mock_crm.delete_sales_scenario(scenario_key)
+
+
+def copy_sales_scenario(
+    scenario_key: str,
+    *,
+    new_key: Optional[str] = None,
+    label: Optional[str] = None,
+) -> dict[str, Any]:
+    return mock_crm.copy_sales_scenario(
+        scenario_key,
+        new_key=new_key,
+        label=label,
+    )
+
+
 def get_crm_aliases() -> list[dict[str, Any]]:
     return mock_crm.list_aliases()
 

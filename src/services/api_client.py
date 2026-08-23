@@ -1455,6 +1455,297 @@ def get_static_capacity_template(dataset: str) -> str:
     return response.text
 
 
+def _sales_http_error(exc: httpx.HTTPStatusError) -> None:
+    if exc.response.status_code in (400, 409):
+        detail: Any
+        try:
+            body = exc.response.json()
+            detail = body.get("detail", body) if isinstance(body, dict) else body
+        except Exception:
+            detail = (exc.response.text or "")[:800]
+        raise ValueError(str(detail)) from exc
+
+
+def get_sales_parameters() -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_sales_parameters()
+    try:
+        data = _get_json(_client_crm, "/api/v1/crm/config/sales-parameters")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def put_sales_calc(
+    *,
+    usage_basis: Optional[str] = None,
+    upsell_enabled: Optional[bool] = None,
+    replication_provider: Optional[str] = None,
+    waflb_appliance: Optional[str] = None,
+    waflb_distribute: Optional[bool] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_sales_calc(
+            usage_basis=usage_basis,
+            upsell_enabled=upsell_enabled,
+            replication_provider=replication_provider,
+            waflb_appliance=waflb_appliance,
+            waflb_distribute=waflb_distribute,
+        )
+    body: dict[str, Any] = {}
+    if usage_basis is not None:
+        body["usage_basis"] = usage_basis
+    if upsell_enabled is not None:
+        body["upsell_enabled"] = upsell_enabled
+    if replication_provider is not None:
+        body["replication_provider"] = replication_provider
+    if waflb_appliance is not None:
+        body["waflb_appliance"] = waflb_appliance
+    if waflb_distribute is not None:
+        body["waflb_distribute"] = waflb_distribute
+    try:
+        out = _put_json(_client_crm, "/api/v1/crm/config/sales-calc", body)
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
+def put_sales_discount(
+    *,
+    scope_kind: str,
+    scope_key: str,
+    kind: str,
+    ratio: float,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_sales_discount(
+            scope_kind=scope_kind,
+            scope_key=scope_key,
+            kind=kind,
+            ratio=ratio,
+        )
+    body = {
+        "scope_kind": scope_kind,
+        "scope_key": scope_key,
+        "kind": kind,
+        "ratio": ratio,
+    }
+    try:
+        out = _put_json(_client_crm, "/api/v1/crm/config/sales-discounts", body)
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
+def put_sales_threshold(
+    *,
+    resource_type: str,
+    dc_code: str,
+    sellable_limit_pct: float,
+    notes: Optional[str] = None,
+    panel_key: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_sales_threshold(
+            resource_type=resource_type,
+            dc_code=dc_code,
+            sellable_limit_pct=sellable_limit_pct,
+            notes=notes,
+            panel_key=panel_key,
+        )
+    body = {
+        "resource_type": resource_type,
+        "dc_code": dc_code,
+        "sellable_limit_pct": sellable_limit_pct,
+        "notes": notes,
+        "panel_key": panel_key or None,
+    }
+    try:
+        out = _put_json(_client_crm, "/api/v1/crm/config/sales-thresholds", body)
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
+def put_sales_ratio(
+    family: str,
+    *,
+    dc_code: str = "*",
+    cpu_per_unit: float = 1.0,
+    ram_gb_per_unit: float = 8.0,
+    storage_gb_per_unit: float = 100.0,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_sales_ratio(
+            family,
+            dc_code=dc_code,
+            cpu_per_unit=cpu_per_unit,
+            ram_gb_per_unit=ram_gb_per_unit,
+            storage_gb_per_unit=storage_gb_per_unit,
+            notes=notes,
+        )
+    enc = quote(family, safe="")
+    body = {
+        "dc_code": dc_code,
+        "cpu_per_unit": cpu_per_unit,
+        "ram_gb_per_unit": ram_gb_per_unit,
+        "storage_gb_per_unit": storage_gb_per_unit,
+        "notes": notes,
+    }
+    try:
+        out = _put_json(_client_crm, f"/api/v1/crm/config/sales-ratios/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
+def list_sales_scenarios() -> list[dict[str, Any]]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.list_sales_scenarios()
+    try:
+        data = _get_json(_client_crm, "/api/v1/crm/config/sales-scenarios")
+        return data if isinstance(data, list) else []
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return []
+
+
+def create_sales_scenario(
+    *,
+    scenario_key: str,
+    label: str,
+    payload: Optional[dict[str, Any]] = None,
+    sort_order: int = 100,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.create_sales_scenario(
+            scenario_key=scenario_key,
+            label=label,
+            payload=payload,
+            sort_order=sort_order,
+        )
+    body = {
+        "scenario_key": scenario_key,
+        "label": label,
+        "payload": payload or {},
+        "sort_order": sort_order,
+    }
+    try:
+        out = _post_json(_client_crm, "/api/v1/crm/config/sales-scenarios", body)
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
+def update_sales_scenario(
+    scenario_key: str,
+    *,
+    label: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+    sort_order: Optional[int] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.update_sales_scenario(
+            scenario_key,
+            label=label,
+            payload=payload,
+            sort_order=sort_order,
+        )
+    enc = quote(scenario_key, safe="")
+    body: dict[str, Any] = {}
+    if label is not None:
+        body["label"] = label
+    if payload is not None:
+        body["payload"] = payload
+    if sort_order is not None:
+        body["sort_order"] = sort_order
+    try:
+        out = _put_json(_client_crm, f"/api/v1/crm/config/sales-scenarios/{enc}", body)
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
+def delete_sales_scenario(scenario_key: str) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.delete_sales_scenario(scenario_key)
+    enc = quote(scenario_key, safe="")
+    try:
+        out = _delete_json(_client_crm, f"/api/v1/crm/config/sales-scenarios/{enc}")
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
+def copy_sales_scenario(
+    scenario_key: str,
+    *,
+    new_key: Optional[str] = None,
+    label: Optional[str] = None,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.copy_sales_scenario(
+            scenario_key,
+            new_key=new_key,
+            label=label,
+        )
+    enc = quote(scenario_key, safe="")
+    body: dict[str, Any] = {}
+    if new_key:
+        body["new_key"] = new_key
+    if label:
+        body["label"] = label
+    try:
+        out = _post_json(_client_crm, f"/api/v1/crm/config/sales-scenarios/{enc}/copy", body)
+        return out if isinstance(out, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        _sales_http_error(exc)
+        return {}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Sellable Potential (customer-api)
 # ---------------------------------------------------------------------------
