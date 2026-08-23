@@ -367,6 +367,34 @@ def put_crm_calc_config(
     )
 
 
+def get_static_capacity() -> dict[str, Any]:
+    return mock_crm.list_static_capacity()
+
+
+def put_static_capacity(payload: dict[str, Any]) -> dict[str, Any]:
+    return mock_crm.save_static_capacity(payload, updated_by="mock")
+
+
+def post_static_capacity_import(
+    *,
+    dataset: str,
+    csv_text: str,
+    filename: str = "",
+    confirm: bool = False,
+) -> dict[str, Any]:
+    return mock_crm.import_static_capacity_csv(
+        dataset,
+        csv_text,
+        filename=filename or None,
+        confirm=confirm,
+        updated_by="mock",
+    )
+
+
+def get_static_capacity_template(dataset: str) -> str:
+    return mock_crm.static_capacity_template(dataset)
+
+
 def get_crm_aliases() -> list[dict[str, Any]]:
     return mock_crm.list_aliases()
 

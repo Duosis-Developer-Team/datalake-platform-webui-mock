@@ -1384,6 +1384,78 @@ def put_crm_calc_config(
 
 
 # ---------------------------------------------------------------------------
+# Static capacity (crm-engine W0) — match Datalake-Platform-GUI api_client
+# ---------------------------------------------------------------------------
+
+
+def get_static_capacity() -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_static_capacity()
+    try:
+        data = _get_json(_client_crm, "/api/v1/crm/config/static-capacity")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def put_static_capacity(payload: dict[str, Any]) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.put_static_capacity(payload)
+    try:
+        out = _put_json(_client_crm, "/api/v1/crm/config/static-capacity", payload)
+        return out if isinstance(out, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def post_static_capacity_import(
+    *,
+    dataset: str,
+    csv_text: str,
+    filename: str = "",
+    confirm: bool = False,
+) -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        result = _mock_client.post_static_capacity_import(
+            dataset=dataset,
+            csv_text=csv_text,
+            filename=filename,
+            confirm=confirm,
+        )
+        if not result.get("ok"):
+            raise ValueError(result.get("message") or "static capacity import failed")
+        return result
+    body = {
+        "dataset": dataset,
+        "csv_text": csv_text,
+        "filename": filename or None,
+        "confirm": confirm,
+    }
+    out = _post_json(_client_crm, "/api/v1/crm/config/static-capacity/import", body)
+    return out if isinstance(out, dict) else {}
+
+
+def get_static_capacity_template(dataset: str) -> str:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_static_capacity_template(dataset)
+    response = _client_crm.get(
+        "/api/v1/crm/config/static-capacity/template",
+        params={"dataset": dataset},
+        headers=_auth_headers(),
+    )
+    response.raise_for_status()
+    return response.text
+
+
+# ---------------------------------------------------------------------------
 # Sellable Potential (customer-api)
 # ---------------------------------------------------------------------------
 

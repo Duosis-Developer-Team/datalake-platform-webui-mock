@@ -5,7 +5,10 @@ These datasets intentionally mirror the FastAPI response shapes used by `custome
 
 from __future__ import annotations
 
+import csv
+import io
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 _THRESH_ID_SEQ = 3
@@ -1130,6 +1133,599 @@ def upsert_unit_conversion(
 
 def delete_unit_conversion(from_unit: str, to_unit: str) -> dict[str, Any]:
     return {"status": "ok", "rows_deleted": 1, "from_unit": from_unit, "to_unit": to_unit}
+
+
+# ---------------------------------------------------------------------------
+# Static capacity (W0) — Network / OpenStack / GPU. Mirrors crm-engine
+# GET/PUT /crm/config/static-capacity, GET .../template, POST .../import.
+# ---------------------------------------------------------------------------
+
+_KNOWN_DCS = frozenset(
+    {
+        "DC11",
+        "DC12",
+        "DC13",
+        "DC14",
+        "DC15",
+        "DC16",
+        "DC17",
+        "DC18",
+        "AZ11",
+        "UZ11",
+        "ICT11",
+        "ICT21",
+    }
+)
+_OS_KINDS = frozenset({"package", "public_ip", "ceph"})
+_NETWORK_HEADERS = (
+    "dc",
+    "public_ip",
+    "subnet_30",
+    "spine_port",
+    "leaf_port",
+    "mgmt_port",
+    "internet_total_mbps",
+    "internet_sellable_mbps",
+    "ddos_capable",
+    "ddos_sellable_mbps",
+)
+_OPENSTACK_HEADERS = ("kind", "key", "label", "quantity", "unit", "hypervisor", "notes")
+_GPU_HEADERS = ("gpu_model", "package_key", "quantity", "hypervisor", "notes")
+_TRUE = frozenset({"true", "1", "yes", "y", "on", "evet", "e"})
+_FALSE = frozenset({"false", "0", "no", "n", "off", "hayir", "h"})
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _net(
+    dc: str,
+    public_ip: int,
+    subnet_30: int,
+    spine_port: int,
+    leaf_port: int,
+    mgmt_port: int,
+    internet_total_mbps: float,
+    internet_sellable_mbps: float,
+    ddos_capable: bool,
+    ddos_sellable_mbps: float,
+) -> dict[str, Any]:
+    return {
+        "dc": dc,
+        "public_ip": public_ip,
+        "subnet_30": subnet_30,
+        "spine_port": spine_port,
+        "leaf_port": leaf_port,
+        "mgmt_port": mgmt_port,
+        "internet_total_mbps": internet_total_mbps,
+        "internet_sellable_mbps": internet_sellable_mbps,
+        "ddos_capable": ddos_capable,
+        "ddos_sellable_mbps": ddos_sellable_mbps,
+        "notes": "09.08 workbook seed",
+        "source": "seed",
+        "updated_by": "mock",
+        "updated_at": "2026-08-23T09:00:00+00:00",
+    }
+
+
+_STATIC_SEED: dict[str, Any] = {
+    "network": [
+        _net("DC11", 40, 10, 54, 94, 40, 4000, 1500, True, 1500),
+        _net("DC12", 200, 50, 0, 11, 40, 3000, 2000, True, 2000),
+        _net("DC13", 232, 58, 8, 139, 200, 100000, 85000, True, 85000),
+        _net("DC14", 104, 26, 40, 102, 120, 6000, 1000, True, 1000),
+        _net("DC15", 24, 6, 40, 94, 50, 2000, 100, True, 100),
+        _net("DC16", 256, 64, 40, 94, 26, 4000, 1500, True, 1500),
+        _net("DC17", 168, 42, 54, 64, 88, 1000, 600, True, 600),
+        _net("DC18", 0, 0, 40, 60, 28, 0, 0, True, 0),
+        _net("AZ11", 160, 40, 0, 68, 80, 200, 20, True, 20),
+        _net("UZ11", 160, 40, 0, 76, 24, 500, 300, True, 300),
+        _net("ICT11", 0, 0, 0, 48, 66, 2000, 400, True, 400),
+        _net("ICT21", 188, 47, 0, 40, 46, 2000, 1000, True, 1000),
+    ],
+    "waf_lb": {
+        "total_throughput_gbps": 350.0,
+        "appliance_size": "5g",
+        "max_units_5g": None,
+        "max_units_1g": None,
+        "max_units_200m": 900,
+        "distribute_across_dcs": False,
+        "source": "seed",
+        "updated_by": "mock",
+        "updated_at": "2026-08-23T09:00:00+00:00",
+    },
+    "openstack": [
+        {
+            "kind": "package",
+            "key": "os_accel_n1h96s",
+            "label": "Accelerated_N1H96s",
+            "quantity": 1.0,
+            "unit": "adet",
+            "hypervisor": "hv07",
+            "aux_total": None,
+            "aux_used": None,
+            "notes": "09.08 workbook",
+            "source": "seed",
+            "updated_by": "mock",
+            "updated_at": "2026-08-23T09:00:00+00:00",
+        },
+        {
+            "kind": "public_ip",
+            "key": "os_public_ip",
+            "label": "public",
+            "quantity": 3.0,
+            "unit": "adet",
+            "hypervisor": "",
+            "aux_total": 228.0,
+            "aux_used": 225.0,
+            "notes": "empty IP; total 228 / used 225",
+            "source": "seed",
+            "updated_by": "mock",
+            "updated_at": "2026-08-23T09:00:00+00:00",
+        },
+        {
+            "kind": "ceph",
+            "key": "ceph_sellable_tib",
+            "label": "KALAN SATILABILIR",
+            "quantity": 288.2,
+            "unit": "TiB",
+            "hypervisor": "",
+            "aux_total": None,
+            "aux_used": None,
+            "notes": "do not re-apply disk threshold (Y10)",
+            "source": "seed",
+            "updated_by": "mock",
+            "updated_at": "2026-08-23T09:00:00+00:00",
+        },
+    ],
+    "gpu": [
+        {
+            "gpu_model": "H100",
+            "package_key": "os_accel_n1h96s",
+            "quantity": 1.0,
+            "hypervisor": "hv07",
+            "notes": "09.08 Accelerated_N1H96s",
+            "source": "seed",
+            "updated_by": "mock",
+            "updated_at": "2026-08-23T09:00:00+00:00",
+        },
+        {
+            "gpu_model": "L40s",
+            "package_key": "os_accel_g1ls8dm",
+            "quantity": 1.0,
+            "hypervisor": "hw06",
+            "notes": "09.08 Accelerated_G1Ls8Dm",
+            "source": "seed",
+            "updated_by": "mock",
+            "updated_at": "2026-08-23T09:00:00+00:00",
+        },
+    ],
+    "imports": [],
+}
+
+_STATIC: dict[str, Any] = deepcopy(_STATIC_SEED)
+
+
+def reset_static_capacity() -> None:
+    """Test helper: restore the W0 seed snapshot."""
+    global _STATIC
+    _STATIC = deepcopy(_STATIC_SEED)
+
+
+def list_static_capacity() -> dict[str, Any]:
+    return deepcopy(_STATIC)
+
+
+def save_static_capacity(payload: dict[str, Any], updated_by: str = "mock") -> dict[str, Any]:
+    stamp = _iso_now()
+    if payload.get("network") is not None:
+        rows = []
+        for rec in payload["network"]:
+            row = deepcopy(rec)
+            row["updated_by"] = updated_by
+            row["updated_at"] = stamp
+            row.setdefault("source", "manual")
+            rows.append(row)
+        _STATIC["network"] = rows
+    if payload.get("waf_lb") is not None:
+        cfg = deepcopy(_STATIC["waf_lb"])
+        cfg.update(payload["waf_lb"])
+        cfg["updated_by"] = updated_by
+        cfg["updated_at"] = stamp
+        cfg.setdefault("source", "manual")
+        _STATIC["waf_lb"] = cfg
+    if payload.get("openstack") is not None:
+        rows = []
+        for rec in payload["openstack"]:
+            row = deepcopy(rec)
+            row["updated_by"] = updated_by
+            row["updated_at"] = stamp
+            row.setdefault("source", "manual")
+            rows.append(row)
+        _STATIC["openstack"] = rows
+    if payload.get("gpu") is not None:
+        rows = []
+        for rec in payload["gpu"]:
+            row = deepcopy(rec)
+            row["updated_by"] = updated_by
+            row["updated_at"] = stamp
+            row.setdefault("source", "manual")
+            rows.append(row)
+        _STATIC["gpu"] = rows
+    return list_static_capacity()
+
+
+def static_capacity_template(dataset: str) -> str:
+    name = (dataset or "network").strip().lower()
+    if name == "network":
+        headers, rows = _NETWORK_HEADERS, _STATIC["network"]
+        body = [
+            [
+                r["dc"],
+                r["public_ip"],
+                r["subnet_30"],
+                r["spine_port"],
+                r["leaf_port"],
+                r["mgmt_port"],
+                r["internet_total_mbps"],
+                r["internet_sellable_mbps"],
+                "true" if r["ddos_capable"] else "false",
+                r["ddos_sellable_mbps"],
+            ]
+            for r in rows
+        ]
+    elif name == "openstack":
+        headers, rows = _OPENSTACK_HEADERS, _STATIC["openstack"]
+        body = [
+            [r["kind"], r["key"], r["label"], r["quantity"], r["unit"], r.get("hypervisor") or "", r.get("notes") or ""]
+            for r in rows
+        ]
+    elif name == "gpu":
+        headers, rows = _GPU_HEADERS, _STATIC["gpu"]
+        body = [
+            [r["gpu_model"], r["package_key"], r["quantity"], r.get("hypervisor") or "", r.get("notes") or ""]
+            for r in rows
+        ]
+    else:
+        raise ValueError(f"unknown dataset '{dataset}'")
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(headers)
+    writer.writerows(body)
+    return buf.getvalue()
+
+
+def import_static_capacity_csv(
+    dataset: str,
+    csv_text: str,
+    *,
+    filename: Optional[str] = None,
+    confirm: bool = False,
+    updated_by: str = "mock",
+) -> dict[str, Any]:
+    name = (dataset or "").strip().lower()
+    parsers = {
+        "network": _parse_network_csv,
+        "openstack": _parse_openstack_csv,
+        "gpu": _parse_gpu_csv,
+    }
+    if name not in parsers:
+        return {
+            "ok": False,
+            "status": "error",
+            "errors": [{"line": 0, "message": f"unknown dataset '{dataset}'"}],
+            "message": "Unknown dataset — nothing was saved",
+        }
+    parsed = parsers[name](csv_text)
+    if parsed.get("errors"):
+        errors = parsed["errors"]
+        return {
+            "ok": False,
+            "status": "error",
+            "errors": errors,
+            "message": f"{len(errors)} row(s) invalid — nothing was saved",
+        }
+    incoming: list[dict[str, Any]] = parsed["rows"]
+    if name == "network":
+        current = _STATIC["network"]
+        keyfn = lambda r: str(r["dc"])
+    elif name == "openstack":
+        current = _STATIC["openstack"]
+        keyfn = lambda r: (str(r["kind"]), str(r["key"]))
+    else:
+        current = _STATIC["gpu"]
+        keyfn = lambda r: (str(r["gpu_model"]), str(r["package_key"]))
+    added, changed, unchanged = _diff_counts(current, incoming, keyfn)
+    preview = {
+        "ok": True,
+        "status": "preview",
+        "dataset": name,
+        "filename": filename,
+        "added": added,
+        "changed": changed,
+        "unchanged": unchanged,
+        "rows": incoming,
+        "warnings": parsed.get("warnings") or [],
+        "message": f"+{added} new · {changed} changed · {unchanged} same",
+    }
+    if not confirm:
+        return preview
+    merged = _upsert_rows(current, incoming, keyfn, updated_by=updated_by)
+    _STATIC[name] = merged
+    audit = {
+        "imported_at": _iso_now(),
+        "imported_by": updated_by,
+        "filename": filename,
+        "dataset": name,
+        "added": added,
+        "changed": changed,
+        "unchanged": unchanged,
+    }
+    _STATIC["imports"] = [audit, *(_STATIC.get("imports") or [])][:5]
+    return {
+        **preview,
+        "status": "imported",
+        "message": f"{len(incoming)} row(s) applied",
+        "payload": list_static_capacity(),
+    }
+
+
+def _diff_counts(
+    current: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+    keyfn,
+) -> tuple[int, int, int]:
+    index = {keyfn(r): r for r in current}
+    added = changed = unchanged = 0
+    for row in incoming:
+        key = keyfn(row)
+        if key not in index:
+            added += 1
+        elif _row_qty_equal(index[key], row):
+            unchanged += 1
+        else:
+            changed += 1
+    return added, changed, unchanged
+
+
+def _row_qty_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    skip = {"source", "updated_by", "updated_at", "notes"}
+    keys = set(left) | set(right)
+    for key in keys:
+        if key in skip:
+            continue
+        if left.get(key) != right.get(key):
+            return False
+    return True
+
+
+def _upsert_rows(
+    current: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+    keyfn,
+    *,
+    updated_by: str,
+) -> list[dict[str, Any]]:
+    stamp = _iso_now()
+    by_key = {keyfn(r): deepcopy(r) for r in current}
+    for row in incoming:
+        merged = deepcopy(row)
+        merged["source"] = "csv"
+        merged["updated_by"] = updated_by
+        merged["updated_at"] = stamp
+        by_key[keyfn(row)] = merged
+    # Keep original order, then append brand-new keys.
+    seen: set[Any] = set()
+    out: list[dict[str, Any]] = []
+    for row in current:
+        key = keyfn(row)
+        out.append(by_key[key])
+        seen.add(key)
+    for row in incoming:
+        key = keyfn(row)
+        if key not in seen:
+            out.append(by_key[key])
+            seen.add(key)
+    return out
+
+
+def _read_csv_table(text: str) -> tuple[list[str], list[tuple[int, dict[str, str]]]]:
+    stream = io.StringIO((text or "").lstrip("\ufeff"))
+    reader = csv.reader(stream)
+    try:
+        raw_header = next(reader)
+    except StopIteration:
+        return [], []
+    headers = [h.strip().lstrip("\ufeff").lower() for h in raw_header]
+    rows: list[tuple[int, dict[str, str]]] = []
+    for line_no, cells in enumerate(reader, start=2):
+        if not any(str(c).strip() for c in cells):
+            continue
+        rec = {headers[i]: (cells[i] if i < len(cells) else "") for i in range(len(headers))}
+        rows.append((line_no, rec))
+    return headers, rows
+
+
+def _missing(headers: list[str], required: tuple[str, ...]) -> list[str]:
+    present = set(headers)
+    return [c for c in required if c not in present]
+
+
+def _parse_bool(raw: str, *, line: int, field: str) -> tuple[bool | None, dict[str, Any] | None]:
+    token = str(raw).strip().lower()
+    if token in _TRUE:
+        return True, None
+    if token in _FALSE:
+        return False, None
+    return None, {"line": line, "message": f"Line {line}: '{field}' is not boolean ({raw!r})"}
+
+
+def _parse_number(raw: str, *, line: int, field: str, integer: bool = False) -> tuple[float | None, dict[str, Any] | None]:
+    text = str(raw).strip().replace(" ", "").replace(",", ".")
+    if text == "":
+        return None, {"line": line, "message": f"Line {line}: '{field}' cannot be empty"}
+    try:
+        value = float(text)
+    except ValueError:
+        return None, {"line": line, "message": f"Line {line}: '{field}' is not a number ({raw!r})"}
+    if value < 0:
+        return None, {"line": line, "message": f"Line {line}: {field} cannot be negative"}
+    if integer and not float(value).is_integer():
+        return None, {"line": line, "message": f"Line {line}: {field} must be an integer"}
+    return value, None
+
+
+def _parse_network_csv(text: str) -> dict[str, Any]:
+    headers, records = _read_csv_table(text)
+    missing = _missing(headers, _NETWORK_HEADERS)
+    if missing:
+        return {"errors": [{"line": 1, "message": f"Missing column '{name}'"} for name in missing], "rows": []}
+    errors: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    for line, rec in records:
+        dc = "".join(str(rec.get("dc") or "").split()).upper()
+        if dc not in _KNOWN_DCS:
+            errors.append({"line": line, "message": f"Line {line}: unknown DC '{rec.get('dc')}'"})
+            continue
+        if dc in seen:
+            errors.append({"line": line, "message": f"Line {line}: DC {dc} duplicated"})
+            continue
+        seen[dc] = line
+        ints: dict[str, int] = {}
+        ok_row = True
+        for field in ("public_ip", "subnet_30", "spine_port", "leaf_port", "mgmt_port"):
+            val, err = _parse_number(rec.get(field, ""), line=line, field=field, integer=True)
+            if err:
+                errors.append(err)
+                ok_row = False
+            else:
+                ints[field] = int(val or 0)
+        floats: dict[str, float] = {}
+        for field in ("internet_total_mbps", "internet_sellable_mbps", "ddos_sellable_mbps"):
+            val, err = _parse_number(rec.get(field, ""), line=line, field=field)
+            if err:
+                errors.append(err)
+                ok_row = False
+            else:
+                floats[field] = float(val or 0)
+        capable, err = _parse_bool(rec.get("ddos_capable", ""), line=line, field="ddos_capable")
+        if err:
+            errors.append(err)
+            ok_row = False
+        if not ok_row:
+            continue
+        if floats["internet_sellable_mbps"] > floats["internet_total_mbps"]:
+            errors.append({"line": line, "message": f"Line {line}: internet_sellable exceeds internet_total"})
+            continue
+        if capable is False and floats["ddos_sellable_mbps"] > 0:
+            errors.append(
+                {
+                    "line": line,
+                    "message": f"Line {line}: ddos_capable=false cannot have ddos_sellable_mbps > 0",
+                }
+            )
+            continue
+        rows.append(
+            {
+                "dc": dc,
+                "public_ip": ints["public_ip"],
+                "subnet_30": ints["subnet_30"],
+                "spine_port": ints["spine_port"],
+                "leaf_port": ints["leaf_port"],
+                "mgmt_port": ints["mgmt_port"],
+                "internet_total_mbps": floats["internet_total_mbps"],
+                "internet_sellable_mbps": floats["internet_sellable_mbps"],
+                "ddos_capable": bool(capable),
+                "ddos_sellable_mbps": floats["ddos_sellable_mbps"],
+                "notes": "",
+                "source": "csv",
+            }
+        )
+    return {"errors": errors, "rows": rows}
+
+
+def _parse_openstack_csv(text: str) -> dict[str, Any]:
+    headers, records = _read_csv_table(text)
+    missing = _missing(headers, _OPENSTACK_HEADERS)
+    if missing:
+        return {"errors": [{"line": 1, "message": f"Missing column '{name}'"} for name in missing], "rows": []}
+    errors: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    seen: dict[tuple[str, str], int] = {}
+    for line, rec in records:
+        kind = str(rec.get("kind") or "").strip().lower()
+        key = str(rec.get("key") or "").strip()
+        if kind not in _OS_KINDS:
+            errors.append({"line": line, "message": f"Line {line}: unknown kind '{rec.get('kind')}'"})
+            continue
+        if not key:
+            errors.append({"line": line, "message": f"Line {line}: 'key' is required"})
+            continue
+        ident = (kind, key)
+        if ident in seen:
+            errors.append({"line": line, "message": f"Line {line}: {kind}/{key} duplicated"})
+            continue
+        seen[ident] = line
+        qty, err = _parse_number(rec.get("quantity", ""), line=line, field="quantity")
+        if err:
+            errors.append(err)
+            continue
+        rows.append(
+            {
+                "kind": kind,
+                "key": key,
+                "label": str(rec.get("label") or key),
+                "quantity": float(qty or 0),
+                "unit": str(rec.get("unit") or ""),
+                "hypervisor": str(rec.get("hypervisor") or ""),
+                "notes": str(rec.get("notes") or ""),
+                "aux_total": None,
+                "aux_used": None,
+                "source": "csv",
+            }
+        )
+    return {"errors": errors, "rows": rows}
+
+
+def _parse_gpu_csv(text: str) -> dict[str, Any]:
+    headers, records = _read_csv_table(text)
+    missing = _missing(headers, _GPU_HEADERS)
+    if missing:
+        return {"errors": [{"line": 1, "message": f"Missing column '{name}'"} for name in missing], "rows": []}
+    errors: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    seen: dict[tuple[str, str], int] = {}
+    for line, rec in records:
+        model = str(rec.get("gpu_model") or "").strip()
+        package = str(rec.get("package_key") or "").strip()
+        if not model:
+            errors.append({"line": line, "message": f"Line {line}: 'gpu_model' is required"})
+            continue
+        if not package:
+            errors.append({"line": line, "message": f"Line {line}: 'package_key' is required"})
+            continue
+        ident = (model, package)
+        if ident in seen:
+            errors.append({"line": line, "message": f"Line {line}: {model}/{package} duplicated"})
+            continue
+        seen[ident] = line
+        qty, err = _parse_number(rec.get("quantity", ""), line=line, field="quantity")
+        if err:
+            errors.append(err)
+            continue
+        rows.append(
+            {
+                "gpu_model": model,
+                "package_key": package,
+                "quantity": float(qty or 0),
+                "hypervisor": str(rec.get("hypervisor") or ""),
+                "notes": str(rec.get("notes") or ""),
+                "source": "csv",
+            }
+        )
+    return {"errors": errors, "rows": rows}
 
 
 def customer_sales_summary(_customer_name: str) -> dict[str, Any]:

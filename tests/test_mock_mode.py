@@ -103,6 +103,11 @@ def test_api_client_crm_config_when_mock(mock_env) -> None:
     assert isinstance(mappings, list)
     assert mappings[0]["productid"]
 
+    static = ac.get_static_capacity()
+    assert isinstance(static, dict)
+    assert len(static.get("network") or []) == 12
+    assert static.get("waf_lb", {}).get("max_units_200m") == 900
+
     summ = ac.get_sellable_summary("*")
     assert isinstance(summ, dict)
     assert summ.get("total_potential_tl") == 5580.0
