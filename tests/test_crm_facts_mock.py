@@ -57,3 +57,18 @@ def test_fact_row_schema() -> None:
     }
     assert required <= set(rows[0])
     assert {r["dc_code"] for r in rows} == {"DC13", "DC14"}
+    missing_price = [r for r in rows if r["status"] == "fiyat_yok"]
+    assert missing_price
+    assert missing_price[0]["sellable_qty"] > 0
+    assert missing_price[0]["sellable_tl"] is None
+
+
+def test_envelope_has_both_tl_fields_and_scope_filter() -> None:
+    by_dc = mock_client.get_crm_facts_by_dc("*")
+    assert by_dc["sellable_tl"] == by_dc["total_sellable_tl"] == 5580.0
+    assert by_dc["unassigned_share"] == 0.0
+    assert "region" in by_dc["rows"][0]
+    scoped = mock_crm.crm_facts("DC13")
+    assert abs(float(scoped["sellable_tl"]) - 360.0) < 0.01
+    assert {r["dc_code"] for r in scoped["facts"]} == {"DC13"}
+

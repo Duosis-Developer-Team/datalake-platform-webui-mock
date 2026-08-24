@@ -582,10 +582,13 @@ def get_crm_facts_by_dc(scope: str = "*") -> dict[str, Any]:
     bundle = mock_crm.crm_facts(scope)
     return {
         "scope": bundle["scope"],
-        "status": "ok",
+        "status": bundle["status"],
         "etag": bundle["etag"],
         "rows": bundle["by_dc"],
         "sellable_tl": bundle["sellable_tl"],
+        "total_sellable_tl": bundle["total_sellable_tl"],
+        "unassigned_tl": bundle["unassigned_tl"],
+        "unassigned_share": bundle["unassigned_share"],
     }
 
 
@@ -593,10 +596,13 @@ def get_crm_facts_by_service(scope: str = "*") -> dict[str, Any]:
     bundle = mock_crm.crm_facts(scope)
     return {
         "scope": bundle["scope"],
-        "status": "ok",
+        "status": bundle["status"],
         "etag": bundle["etag"],
         "rows": bundle["by_service"],
         "sellable_tl": bundle["sellable_tl"],
+        "total_sellable_tl": bundle["total_sellable_tl"],
+        "unassigned_tl": bundle["unassigned_tl"],
+        "unassigned_share": bundle["unassigned_share"],
     }
 
 
@@ -604,10 +610,13 @@ def get_crm_facts_by_region(scope: str = "*") -> dict[str, Any]:
     bundle = mock_crm.crm_facts(scope)
     return {
         "scope": bundle["scope"],
-        "status": "ok",
+        "status": bundle["status"],
         "etag": bundle["etag"],
         "rows": bundle["by_region"],
         "sellable_tl": bundle["sellable_tl"],
+        "total_sellable_tl": bundle["total_sellable_tl"],
+        "unassigned_tl": bundle["unassigned_tl"],
+        "unassigned_share": bundle["unassigned_share"],
     }
 
 
