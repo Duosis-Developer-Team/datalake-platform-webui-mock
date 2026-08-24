@@ -592,6 +592,94 @@ def sellable_by_family(dc_code: str = "*") -> list[dict[str, Any]]:
     return deepcopy(summary.get("families") or [])
 
 
+def crm_facts(scope: str = "*") -> dict[str, Any]:
+    """Canonical (DC × panel) mock matching GET /api/v1/crm/facts*."""
+    facts = [
+        {
+            "dc_code": "DC13",
+            "panel_key": "virt_hc_cpu",
+            "service_group": "intel_hc",
+            "family": "virt_hyperconverged",
+            "resource_kind": "cpu",
+            "unit": "vcpu",
+            "total": 16.0,
+            "used": 8.0,
+            "threshold": 0.80,
+            "sellable_qty": 3.0,
+            "unit_price_tl": 120.0,
+            "sellable_tl": 360.0,
+            "sold_qty": 8.0,
+            "sold_tl": 960.0,
+            "status": "normal",
+            "reason": None,
+            "basis": "max",
+            "measured_at": "2026-08-24T13:15:00Z",
+        },
+        {
+            "dc_code": "DC14",
+            "panel_key": "virt_hc_cpu",
+            "service_group": "intel_hc",
+            "family": "virt_hyperconverged",
+            "resource_kind": "cpu",
+            "unit": "vcpu",
+            "total": 32.0,
+            "used": 10.0,
+            "threshold": 0.80,
+            "sellable_qty": 43.5,
+            "unit_price_tl": 120.0,
+            "sellable_tl": 5220.0,
+            "sold_qty": 10.0,
+            "sold_tl": 1200.0,
+            "status": "normal",
+            "reason": None,
+            "basis": "max",
+            "measured_at": "2026-08-24T13:15:00Z",
+        },
+    ]
+    total = sum(float(f["sellable_tl"]) for f in facts)
+    return {
+        "scope": scope or "*",
+        "status": "ok",
+        "etag": "mockfacts01",
+        "facts": facts,
+        "sellable_tl": total,
+        "by_dc": [
+            {"dc_code": "DC13", "sellable_tl": 360.0, "fact_count": 1},
+            {"dc_code": "DC14", "sellable_tl": 5220.0, "fact_count": 1},
+        ],
+        "by_service": [
+            {"service_group": "intel_hc", "sellable_tl": total, "fact_count": 2},
+        ],
+        "by_region": [
+            {"region": "Türkiye", "sellable_tl": total, "fact_count": 2},
+        ],
+        "summary": {
+            "sellable_tl": total,
+            "sellable_tl_min": total,
+            "sellable_tl_max": total,
+            "sold_tl": 2160.0,
+            "fact_count": 2,
+            "status": "ok",
+        },
+    }
+
+
+def crm_facts_summary(scope: str = "*") -> dict[str, Any]:
+    bundle = crm_facts(scope)
+    s = bundle["summary"]
+    return {
+        "scope": bundle["scope"],
+        "status": "ok",
+        "etag": bundle["etag"],
+        "sellable_tl": s["sellable_tl"],
+        "total_sellable_tl": s["sellable_tl"],
+        "min": s["sellable_tl_min"],
+        "max": s["sellable_tl_max"],
+        "sold_tl": s["sold_tl"],
+        "fact_count": s["fact_count"],
+    }
+
+
 def inventory_overview(dc_code: str = "*") -> dict[str, Any]:
     """Global CRM inventory overview fixture (capacity vs CRM sold vs used)."""
     panels = [
