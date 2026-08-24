@@ -574,44 +574,52 @@ def get_sellable_by_family(dc_code: str = "*") -> list[dict[str, Any]]:
     return mock_crm.sellable_by_family(dc_code)
 
 
+def _crm_facts_rows(scope: str, bundle_key: str) -> dict[str, Any]:
+    """Shared envelope of the by-dc / by-service / by-region endpoints."""
+    if mock_crm.facts_are_partial():
+        return deepcopy(mock_crm.crm_facts_partial(scope))
+    bundle = mock_crm.crm_facts(scope)
+    return {
+        "scope": bundle["scope"],
+        "status": "ok",
+        "etag": bundle["etag"],
+        "rows": deepcopy(bundle[bundle_key]),
+        "sellable_tl": bundle["sellable_tl"],
+    }
+
+
 def get_crm_facts(scope: str = "*") -> dict[str, Any]:
-    return deepcopy(mock_crm.crm_facts(scope))
+    if mock_crm.facts_are_partial():
+        return deepcopy(mock_crm.crm_facts_partial(scope))
+    bundle = mock_crm.crm_facts(scope)
+    return {
+        "scope": bundle["scope"],
+        "status": "ok",
+        "etag": bundle["etag"],
+        "facts": deepcopy(bundle["facts"]),
+        "sellable_tl": bundle["sellable_tl"],
+    }
 
 
 def get_crm_facts_by_dc(scope: str = "*") -> dict[str, Any]:
-    bundle = mock_crm.crm_facts(scope)
-    return {
-        "scope": bundle["scope"],
-        "status": "ok",
-        "etag": bundle["etag"],
-        "rows": bundle["by_dc"],
-        "sellable_tl": bundle["sellable_tl"],
-    }
+    return _crm_facts_rows(scope, "by_dc")
 
 
 def get_crm_facts_by_service(scope: str = "*") -> dict[str, Any]:
-    bundle = mock_crm.crm_facts(scope)
-    return {
-        "scope": bundle["scope"],
-        "status": "ok",
-        "etag": bundle["etag"],
-        "rows": bundle["by_service"],
-        "sellable_tl": bundle["sellable_tl"],
-    }
+    return _crm_facts_rows(scope, "by_service")
 
 
 def get_crm_facts_by_region(scope: str = "*") -> dict[str, Any]:
-    bundle = mock_crm.crm_facts(scope)
-    return {
-        "scope": bundle["scope"],
-        "status": "ok",
-        "etag": bundle["etag"],
-        "rows": bundle["by_region"],
-        "sellable_tl": bundle["sellable_tl"],
-    }
+    return _crm_facts_rows(scope, "by_region")
 
 
 def get_crm_facts_summary(scope: str = "*") -> dict[str, Any]:
+    if mock_crm.facts_are_partial():
+        body = deepcopy(mock_crm.crm_facts_partial(scope))
+        body["total_sellable_tl"] = None
+        body["min"] = None
+        body["max"] = None
+        return body
     return deepcopy(mock_crm.crm_facts_summary(scope))
 
 

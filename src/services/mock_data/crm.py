@@ -592,75 +592,494 @@ def sellable_by_family(dc_code: str = "*") -> list[dict[str, Any]]:
     return deepcopy(summary.get("families") or [])
 
 
-def crm_facts(scope: str = "*") -> dict[str, Any]:
-    """Canonical (DC × panel) mock matching GET /api/v1/crm/facts*."""
-    facts = [
-        {
-            "dc_code": "DC13",
-            "panel_key": "virt_hc_cpu",
-            "service_group": "intel_hc",
-            "family": "virt_hyperconverged",
-            "resource_kind": "cpu",
-            "unit": "vcpu",
-            "total": 16.0,
-            "used": 8.0,
-            "threshold": 0.80,
-            "sellable_qty": 3.0,
-            "unit_price_tl": 120.0,
-            "sellable_tl": 360.0,
-            "sold_qty": 8.0,
-            "sold_tl": 960.0,
-            "status": "normal",
-            "reason": None,
-            "basis": "max",
-            "measured_at": "2026-08-24T13:15:00Z",
-        },
-        {
-            "dc_code": "DC14",
-            "panel_key": "virt_hc_cpu",
-            "service_group": "intel_hc",
-            "family": "virt_hyperconverged",
-            "resource_kind": "cpu",
-            "unit": "vcpu",
-            "total": 32.0,
-            "used": 10.0,
-            "threshold": 0.80,
-            "sellable_qty": 43.5,
-            "unit_price_tl": 120.0,
-            "sellable_tl": 5220.0,
-            "sold_qty": 10.0,
-            "sold_tl": 1200.0,
-            "status": "normal",
-            "reason": None,
-            "basis": "max",
-            "measured_at": "2026-08-24T13:15:00Z",
-        },
+_FACT_STATUS_NORMAL = "normal"
+_FACT_STATUS_UNCOMPUTABLE = "hesaplanamiyor"
+_FACT_STATUS_NOT_SALES_BOUND = "satisa_bagli_degil"
+
+#: Mirrors ``shared.sellable.models.SERVICE_GROUP_ORDER``.
+_FACT_SERVICE_GROUP_ORDER: tuple[str, ...] = (
+    "intel_km",
+    "intel_hc",
+    "ibm_power",
+    "replication",
+    "netbackup",
+    "s3",
+    "network",
+    "openstack_gpu",
+    "management",
+)
+
+#: Mirrors ``shared.sellable.models.KNOWN_DC_REGION_MAP``. A fact whose
+#: ``dc_code`` is missing from this map lands in the ``unassigned`` bucket —
+#: that is how global rows (``dc_code == "*"``) behave on the real engine.
+_FACT_REGION_MAP: dict[str, str] = {
+    "DC11": "Türkiye",
+    "DC12": "Türkiye",
+    "DC13": "Türkiye",
+    "DC14": "Türkiye",
+    "DC15": "Türkiye",
+    "DC16": "Türkiye",
+    "DC17": "Türkiye",
+    "DC18": "Türkiye",
+    "AZ11": "Asya",
+    "UZ11": "Asya",
+    "ICT11": "Avrupa",
+    "ICT21": "Avrupa",
+}
+
+_FACT_MEASURED_AT = "2026-08-24T12:10:40+00:00"
+
+#: Synthetic (DC × panel) rows. Field names and value *shapes* follow
+#: ``shared.sellable.facts.SellableFact``; the numbers are invented.
+#: Deliberately covered edge cases, because consumers must survive them:
+#:   * ``dc_code == "*"`` global rows kept by the dc_panels/global merge
+#:   * ``unit_price_tl is None`` on Network / OpenStack / Management rows
+#:   * ``sellable_tl is None`` for non-``normal`` panel statuses
+_CRM_FACTS: tuple[dict[str, Any], ...] = (
+    {
+        "dc_code": "DC13",
+        "panel_key": "virt_km_cpu",
+        "service_group": "intel_km",
+        "family": "virt_km",
+        "resource_kind": "cpu",
+        "unit": "vCPU",
+        "total": 600.0,
+        "used": 400.0,
+        "threshold": 0.80,
+        "sellable_qty": 120.0,
+        "unit_price_tl": 150.0,
+        "sellable_tl": 18000.0,
+        "sold_qty": 40.0,
+        "sold_tl": 6000.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        # Network is quantity-less and unpriced upstream: unit_price_tl stays
+        # None and must not be back-filled with a made-up price.
+        "dc_code": "DC13",
+        "panel_key": "network_public_ipv4",
+        "service_group": "network",
+        "family": "network",
+        "resource_kind": "other",
+        "unit": "Adet",
+        "total": None,
+        "used": None,
+        "threshold": None,
+        "sellable_qty": None,
+        "unit_price_tl": None,
+        "sellable_tl": 0.0,
+        "sold_qty": 500.0,
+        "sold_tl": 104000.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "DC14",
+        "panel_key": "virt_hc_cpu",
+        "service_group": "intel_hc",
+        "family": "virt_hyperconverged",
+        "resource_kind": "cpu",
+        "unit": "vCPU",
+        "total": 320.0,
+        "used": 200.0,
+        "threshold": 0.80,
+        "sellable_qty": 80.0,
+        "unit_price_tl": 150.0,
+        "sellable_tl": 12000.0,
+        "sold_qty": 25.0,
+        "sold_tl": 3750.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "DC14",
+        "panel_key": "mgmt_support_7x24",
+        "service_group": "management",
+        "family": "mgmt_misc",
+        "resource_kind": "other",
+        "unit": "per VM",
+        "total": None,
+        "used": None,
+        "threshold": None,
+        "sellable_qty": None,
+        "unit_price_tl": None,
+        "sellable_tl": 0.0,
+        "sold_qty": 2400.0,
+        "sold_tl": 655200.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "DC15",
+        "panel_key": "virt_km_disk",
+        "service_group": "intel_km",
+        "family": "virt_km",
+        "resource_kind": "storage",
+        "unit": "TB",
+        "total": None,
+        "used": None,
+        "threshold": 0.80,
+        "sellable_qty": None,
+        "unit_price_tl": 40.0,
+        "sellable_tl": None,
+        "sold_qty": None,
+        "sold_tl": None,
+        "status": _FACT_STATUS_UNCOMPUTABLE,
+        "reason": "infra_metric_missing",
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "DC16",
+        "panel_key": "mgmt_vmware_license",
+        "service_group": "management",
+        "family": "mgmt_misc",
+        "resource_kind": "other",
+        "unit": "Adet",
+        "total": 64.0,
+        "used": 64.0,
+        "threshold": None,
+        "sellable_qty": 64.0,
+        "unit_price_tl": None,
+        "sellable_tl": None,
+        "sold_qty": None,
+        "sold_tl": None,
+        "status": _FACT_STATUS_NOT_SALES_BOUND,
+        "reason": "not_sales_bound",
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "AZ11",
+        "panel_key": "virt_km_mem",
+        "service_group": "intel_km",
+        "family": "virt_km",
+        "resource_kind": "memory",
+        "unit": "GB",
+        "total": 2560.0,
+        "used": 1800.0,
+        "threshold": 0.80,
+        "sellable_qty": 512.0,
+        "unit_price_tl": 25.0,
+        "sellable_tl": 12800.0,
+        "sold_qty": None,
+        "sold_tl": None,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "ICT11",
+        "panel_key": "virt_hc_mem",
+        "service_group": "intel_hc",
+        "family": "virt_hyperconverged",
+        "resource_kind": "memory",
+        "unit": "GB",
+        "total": 1280.0,
+        "used": 900.0,
+        "threshold": 0.80,
+        "sellable_qty": 256.0,
+        "unit_price_tl": 25.0,
+        "sellable_tl": 6400.0,
+        "sold_qty": None,
+        "sold_tl": None,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "ICT21",
+        "panel_key": "backup_veeam_replication_cpu",
+        "service_group": "replication",
+        "family": "backup_veeam_replication",
+        "resource_kind": "cpu",
+        "unit": "vCPU",
+        "total": 640.0,
+        "used": 640.0,
+        "threshold": 0.80,
+        "sellable_qty": 0.0,
+        "unit_price_tl": 0.0,
+        "sellable_tl": 0.0,
+        "sold_qty": None,
+        "sold_tl": None,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        # Global virtualization row: the engine keeps dc_code "*" when the
+        # measurement is not attributable to a single DC. by-region therefore
+        # reports it as "unassigned".
+        "dc_code": "*",
+        "panel_key": "virt_km_cpu",
+        "service_group": "intel_km",
+        "family": "virt_km",
+        "resource_kind": "cpu",
+        "unit": "vCPU",
+        "total": 20000.0,
+        "used": 14000.0,
+        "threshold": 0.80,
+        "sellable_qty": 4000.0,
+        "unit_price_tl": 150.0,
+        "sellable_tl": 600000.0,
+        "sold_qty": 900.0,
+        "sold_tl": 135000.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "*",
+        "panel_key": "virt_power_mem",
+        "service_group": "ibm_power",
+        "family": "virt_power",
+        "resource_kind": "memory",
+        "unit": "GB",
+        "total": 10240.0,
+        "used": 7000.0,
+        "threshold": 0.80,
+        "sellable_qty": 2048.0,
+        "unit_price_tl": 60.0,
+        "sellable_tl": 122880.0,
+        "sold_qty": 300.0,
+        "sold_tl": 18000.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "*",
+        "panel_key": "storage_s3_istanbul",
+        "service_group": "s3",
+        "family": "storage_s3",
+        "resource_kind": "storage",
+        "unit": "TB",
+        "total": 2600.0,
+        "used": 1600.0,
+        "threshold": None,
+        "sellable_qty": 900.0,
+        "unit_price_tl": 780.0,
+        "sellable_tl": 702000.0,
+        "sold_qty": 4.0,
+        "sold_tl": 3120.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        "dc_code": "*",
+        "panel_key": "backup_netbackup_image",
+        "service_group": "netbackup",
+        "family": "backup_netbackup",
+        "resource_kind": "storage",
+        "unit": "TB",
+        "total": 2350.0,
+        "used": 1700.0,
+        "threshold": None,
+        "sellable_qty": 150.0,
+        "unit_price_tl": 1.5,
+        "sellable_tl": 225.0,
+        "sold_qty": 58.0,
+        "sold_tl": 87.0,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": "max",
+        "measured_at": _FACT_MEASURED_AT,
+    },
+    {
+        # OpenStack capacity is measured but not priced: both unit_price_tl
+        # and sellable_tl stay None so the row is excluded from every total.
+        "dc_code": "*",
+        "panel_key": "os_ceph_raw_total",
+        "service_group": "openstack_gpu",
+        "family": "openstack_gpu",
+        "resource_kind": "other",
+        "unit": "TiB",
+        "total": 1100.0,
+        "used": None,
+        "threshold": None,
+        "sellable_qty": 1100.0,
+        "unit_price_tl": None,
+        "sellable_tl": None,
+        "sold_qty": None,
+        "sold_tl": None,
+        "status": _FACT_STATUS_NORMAL,
+        "reason": None,
+        "basis": None,
+        "measured_at": _FACT_MEASURED_AT,
+    },
+)
+
+#: Flip with :func:`set_facts_partial` to exercise the ``coverage_incomplete``
+#: branch, where the engine returns a status instead of a half-warmed total.
+_FACTS_PARTIAL = False
+
+
+def set_facts_partial(value: bool) -> None:
+    """Toggle the partial-coverage response of GET /api/v1/crm/facts*."""
+    global _FACTS_PARTIAL
+    _FACTS_PARTIAL = bool(value)
+
+
+def facts_are_partial() -> bool:
+    return _FACTS_PARTIAL
+
+
+def _fact_countable(fact: dict[str, Any]) -> bool:
+    return fact.get("status") == _FACT_STATUS_NORMAL and fact.get("sellable_tl") is not None
+
+
+def _fact_sum_tl(facts: list[dict[str, Any]]) -> Optional[float]:
+    values = [float(f["sellable_tl"]) for f in facts if _fact_countable(f)]
+    return round(sum(values), 4) if values else None
+
+
+def _fact_sum_qty(facts: list[dict[str, Any]]) -> Optional[float]:
+    values = [
+        float(f["sellable_qty"])
+        for f in facts
+        if _fact_countable(f) and f.get("sellable_qty") is not None
     ]
-    total = sum(float(f["sellable_tl"]) for f in facts)
+    return round(sum(values), 4) if values else None
+
+
+def _fact_sum_sold_tl(facts: list[dict[str, Any]]) -> Optional[float]:
+    values = [float(f["sold_tl"]) for f in facts if f.get("sold_tl") is not None]
+    return round(sum(values), 4) if values else None
+
+
+def _fact_etag(facts: list[dict[str, Any]]) -> str:
+    """16-hex fingerprint of the fact set, as the engine's blake2s etag is."""
+    canonical = "\n".join(
+        sorted(
+            f"{f['dc_code']}|{f['panel_key']}|{f['sellable_qty']}|{f['sellable_tl']}|{f['status']}"
+            for f in facts
+        )
+    )
+    return hashlib.blake2s(canonical.encode("utf-8"), digest_size=8).hexdigest()
+
+
+def _facts_for_scope(scope: str = "*") -> list[dict[str, Any]]:
+    wanted = (scope or "*").strip() or "*"
+    rows = [deepcopy(f) for f in _CRM_FACTS]
+    if wanted == "*":
+        return rows
+    return [f for f in rows if f["dc_code"] == wanted]
+
+
+def _fact_group_rows(
+    facts: list[dict[str, Any]], key: str, label: str
+) -> list[dict[str, Any]]:
+    order: list[str] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for fact in facts:
+        bucket = fact[key]
+        if bucket not in grouped:
+            order.append(bucket)
+            grouped[bucket] = []
+        grouped[bucket].append(fact)
+    return [
+        {
+            label: bucket,
+            "sellable_tl": _fact_sum_tl(grouped[bucket]),
+            "sellable_qty": _fact_sum_qty(grouped[bucket]),
+            "sold_tl": _fact_sum_sold_tl(grouped[bucket]),
+            "fact_count": len(grouped[bucket]),
+        }
+        for bucket in order
+    ]
+
+
+def crm_facts(scope: str = "*") -> dict[str, Any]:
+    """Canonical (DC × panel) mock bundle behind GET /api/v1/crm/facts*.
+
+    Every aggregate is derived from one fact set, so `by-dc`, `by-service`,
+    `by-region` and `summary` agree by construction — the invariant the
+    crm-engine tests lock down.
+    """
+    facts = _facts_for_scope(scope)
+    total_tl = _fact_sum_tl(facts)
+    by_region_rows: list[dict[str, Any]] = []
+    region_order: list[str] = []
+    region_groups: dict[str, list[dict[str, Any]]] = {}
+    for fact in facts:
+        region = _FACT_REGION_MAP.get(fact["dc_code"], "unassigned")
+        if region not in region_groups:
+            region_order.append(region)
+            region_groups[region] = []
+        region_groups[region].append(fact)
+    for region in region_order:
+        chunk = region_groups[region]
+        by_region_rows.append(
+            {
+                "region": region,
+                "sellable_tl": _fact_sum_tl(chunk),
+                "sellable_qty": _fact_sum_qty(chunk),
+                "sold_tl": _fact_sum_sold_tl(chunk),
+                "fact_count": len(chunk),
+            }
+        )
+
+    by_service_unordered = {
+        row["service_group"]: row
+        for row in _fact_group_rows(facts, "service_group", "service_group")
+    }
+    by_service = [
+        by_service_unordered[group]
+        for group in _FACT_SERVICE_GROUP_ORDER
+        if group in by_service_unordered
+    ]
+    by_service += [
+        row
+        for group, row in by_service_unordered.items()
+        if group not in _FACT_SERVICE_GROUP_ORDER
+    ]
+
     return {
         "scope": scope or "*",
         "status": "ok",
-        "etag": "mockfacts01",
+        "etag": _fact_etag(facts),
         "facts": facts,
-        "sellable_tl": total,
-        "by_dc": [
-            {"dc_code": "DC13", "sellable_tl": 360.0, "fact_count": 1},
-            {"dc_code": "DC14", "sellable_tl": 5220.0, "fact_count": 1},
-        ],
-        "by_service": [
-            {"service_group": "intel_hc", "sellable_tl": total, "fact_count": 2},
-        ],
-        "by_region": [
-            {"region": "Türkiye", "sellable_tl": total, "fact_count": 2},
-        ],
+        "sellable_tl": total_tl,
+        "by_dc": _fact_group_rows(facts, "dc_code", "dc_code"),
+        "by_service": by_service,
+        "by_region": by_region_rows,
         "summary": {
-            "sellable_tl": total,
-            "sellable_tl_min": total,
-            "sellable_tl_max": total,
-            "sold_tl": 2160.0,
-            "fact_count": 2,
-            "status": "ok",
+            "sellable_tl": total_tl,
+            "sellable_tl_min": total_tl,
+            "sellable_tl_max": total_tl,
+            "sold_tl": _fact_sum_sold_tl(facts),
+            "fact_count": len(facts),
+            "status": "ok" if total_tl is not None else "empty",
         },
+    }
+
+
+def crm_facts_partial(scope: str = "*") -> dict[str, Any]:
+    """Envelope the engine returns while inventory coverage is incomplete."""
+    return {
+        "scope": scope or "*",
+        "status": "partial",
+        "etag": _fact_etag(_facts_for_scope(scope)),
+        "facts": None,
+        "rows": None,
+        "sellable_tl": None,
+        "reason": "coverage_incomplete",
     }
 
 
