@@ -624,6 +624,17 @@ def get_crm_facts_summary(scope: str = "*") -> dict[str, Any]:
     return deepcopy(mock_crm.crm_facts_summary(scope))
 
 
+def post_crm_facts_refresh() -> dict[str, Any]:
+    return {
+        "status": "accepted",
+        "queued": True,
+        "job_state": "running",
+        "last_attempt_at": "2026-08-24T13:15:00Z",
+        "last_success_at": "2026-08-24T13:15:00Z",
+        "last_error": None,
+    }
+
+
 def get_crm_inventory_overview(dc_code: str = "*") -> dict[str, Any]:
     return deepcopy(mock_crm.inventory_overview(dc_code))
 
