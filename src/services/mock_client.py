@@ -574,6 +574,47 @@ def get_sellable_by_family(dc_code: str = "*") -> list[dict[str, Any]]:
     return mock_crm.sellable_by_family(dc_code)
 
 
+def get_crm_facts(scope: str = "*") -> dict[str, Any]:
+    return deepcopy(mock_crm.crm_facts(scope))
+
+
+def get_crm_facts_by_dc(scope: str = "*") -> dict[str, Any]:
+    bundle = mock_crm.crm_facts(scope)
+    return {
+        "scope": bundle["scope"],
+        "status": "ok",
+        "etag": bundle["etag"],
+        "rows": bundle["by_dc"],
+        "sellable_tl": bundle["sellable_tl"],
+    }
+
+
+def get_crm_facts_by_service(scope: str = "*") -> dict[str, Any]:
+    bundle = mock_crm.crm_facts(scope)
+    return {
+        "scope": bundle["scope"],
+        "status": "ok",
+        "etag": bundle["etag"],
+        "rows": bundle["by_service"],
+        "sellable_tl": bundle["sellable_tl"],
+    }
+
+
+def get_crm_facts_by_region(scope: str = "*") -> dict[str, Any]:
+    bundle = mock_crm.crm_facts(scope)
+    return {
+        "scope": bundle["scope"],
+        "status": "ok",
+        "etag": bundle["etag"],
+        "rows": bundle["by_region"],
+        "sellable_tl": bundle["sellable_tl"],
+    }
+
+
+def get_crm_facts_summary(scope: str = "*") -> dict[str, Any]:
+    return deepcopy(mock_crm.crm_facts_summary(scope))
+
+
 def get_crm_inventory_overview(dc_code: str = "*") -> dict[str, Any]:
     return deepcopy(mock_crm.inventory_overview(dc_code))
 

@@ -1775,6 +1775,66 @@ def get_crm_inventory_overview(dc_code: str = "*") -> dict[str, Any]:
         return {}
 
 
+def get_crm_facts(scope: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_facts(scope)
+    try:
+        data = _get_json(_client_crm, f"/api/v1/crm/facts?scope={quote(scope, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_facts_by_dc(scope: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_facts_by_dc(scope)
+    try:
+        data = _get_json(_client_crm, f"/api/v1/crm/facts/by-dc?scope={quote(scope, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_facts_by_service(scope: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_facts_by_service(scope)
+    try:
+        data = _get_json(_client_crm, f"/api/v1/crm/facts/by-service?scope={quote(scope, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_facts_by_region(scope: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_facts_by_region(scope)
+    try:
+        data = _get_json(_client_crm, f"/api/v1/crm/facts/by-region?scope={quote(scope, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
+def get_crm_facts_summary(scope: str = "*") -> dict[str, Any]:
+    if _is_mock_mode():
+        from src.services import mock_client as _mock_client
+
+        return _mock_client.get_crm_facts_summary(scope)
+    try:
+        data = _get_json(_client_crm, f"/api/v1/crm/facts/summary?scope={quote(scope, safe='*')}")
+        return data if isinstance(data, dict) else {}
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, ValueError):
+        return {}
+
+
 def get_sellable_by_panel(dc_code: str = "*", family: Optional[str] = None) -> list:
     if _is_mock_mode():
         from src.services import mock_client as _mock_client
