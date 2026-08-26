@@ -582,10 +582,13 @@ def get_crm_facts_by_dc(scope: str = "*") -> dict[str, Any]:
     bundle = mock_crm.crm_facts(scope)
     return {
         "scope": bundle["scope"],
-        "status": "ok",
+        "status": bundle["status"],
         "etag": bundle["etag"],
         "rows": bundle["by_dc"],
         "sellable_tl": bundle["sellable_tl"],
+        "total_sellable_tl": bundle["total_sellable_tl"],
+        "unassigned_tl": bundle["unassigned_tl"],
+        "unassigned_share": bundle["unassigned_share"],
     }
 
 
@@ -593,10 +596,13 @@ def get_crm_facts_by_service(scope: str = "*") -> dict[str, Any]:
     bundle = mock_crm.crm_facts(scope)
     return {
         "scope": bundle["scope"],
-        "status": "ok",
+        "status": bundle["status"],
         "etag": bundle["etag"],
         "rows": bundle["by_service"],
         "sellable_tl": bundle["sellable_tl"],
+        "total_sellable_tl": bundle["total_sellable_tl"],
+        "unassigned_tl": bundle["unassigned_tl"],
+        "unassigned_share": bundle["unassigned_share"],
     }
 
 
@@ -604,15 +610,29 @@ def get_crm_facts_by_region(scope: str = "*") -> dict[str, Any]:
     bundle = mock_crm.crm_facts(scope)
     return {
         "scope": bundle["scope"],
-        "status": "ok",
+        "status": bundle["status"],
         "etag": bundle["etag"],
         "rows": bundle["by_region"],
         "sellable_tl": bundle["sellable_tl"],
+        "total_sellable_tl": bundle["total_sellable_tl"],
+        "unassigned_tl": bundle["unassigned_tl"],
+        "unassigned_share": bundle["unassigned_share"],
     }
 
 
 def get_crm_facts_summary(scope: str = "*") -> dict[str, Any]:
     return deepcopy(mock_crm.crm_facts_summary(scope))
+
+
+def post_crm_facts_refresh() -> dict[str, Any]:
+    return {
+        "status": "accepted",
+        "queued": True,
+        "job_state": "running",
+        "last_attempt_at": "2026-08-24T13:15:00Z",
+        "last_success_at": "2026-08-24T13:15:00Z",
+        "last_error": None,
+    }
 
 
 def get_crm_inventory_overview(dc_code: str = "*") -> dict[str, Any]:

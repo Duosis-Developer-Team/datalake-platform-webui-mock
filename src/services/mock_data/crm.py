@@ -604,6 +604,9 @@ def crm_facts(scope: str = "*") -> dict[str, Any]:
             "unit": "vcpu",
             "total": 16.0,
             "used": 8.0,
+            "used_max": 8.0,
+            "used_avg": 6.5,
+            "used_cur": 6.0,
             "threshold": 0.80,
             "sellable_qty": 3.0,
             "unit_price_tl": 120.0,
@@ -624,6 +627,9 @@ def crm_facts(scope: str = "*") -> dict[str, Any]:
             "unit": "vcpu",
             "total": 32.0,
             "used": 10.0,
+            "used_max": 10.0,
+            "used_avg": 8.0,
+            "used_cur": 7.5,
             "threshold": 0.80,
             "sellable_qty": 43.5,
             "unit_price_tl": 120.0,
@@ -635,30 +641,104 @@ def crm_facts(scope: str = "*") -> dict[str, Any]:
             "basis": "max",
             "measured_at": "2026-08-24T13:15:00Z",
         },
+        {
+            "dc_code": "DC13",
+            "panel_key": "net_internet_access",
+            "service_group": "network",
+            "family": "network",
+            "resource_kind": "other",
+            "unit": "Mbps",
+            "total": 100.0,
+            "used": None,
+            "used_max": None,
+            "used_avg": None,
+            "used_cur": None,
+            "threshold": None,
+            "sellable_qty": 100.0,
+            "unit_price_tl": None,
+            "sellable_tl": None,
+            "sold_qty": None,
+            "sold_tl": None,
+            "status": "fiyat_yok",
+            "reason": "unit_price_missing",
+            "basis": "max",
+            "measured_at": "2026-08-24T13:15:00Z",
+        },
     ]
-    total = sum(float(f["sellable_tl"]) for f in facts)
+    wanted = str(scope or "*").strip() or "*"
+    if wanted != "*":
+        facts = [f for f in facts if f["dc_code"] == wanted]
+    countable = [f for f in facts if f.get("sellable_tl") is not None]
+    total = sum(float(f["sellable_tl"]) for f in countable)
+    dc13_tl = sum(float(f["sellable_tl"]) for f in countable if f["dc_code"] == "DC13")
+    dc14_tl = sum(float(f["sellable_tl"]) for f in countable if f["dc_code"] == "DC14")
+    by_dc = []
+    if any(f["dc_code"] == "DC13" for f in facts):
+        by_dc.append(
+            {
+                "dc_code": "DC13",
+                "region": "Türkiye",
+                "city": "İstanbul",
+                "sellable_tl": dc13_tl,
+                "fact_count": sum(1 for f in facts if f["dc_code"] == "DC13"),
+                "unassigned_share": 0.0,
+                "status": "normal",
+            }
+        )
+    if any(f["dc_code"] == "DC14" for f in facts):
+        by_dc.append(
+            {
+                "dc_code": "DC14",
+                "region": "Türkiye",
+                "city": "Ankara",
+                "sellable_tl": dc14_tl,
+                "fact_count": sum(1 for f in facts if f["dc_code"] == "DC14"),
+                "unassigned_share": 0.0,
+                "status": "normal",
+            }
+        )
     return {
-        "scope": scope or "*",
+        "scope": wanted,
         "status": "ok",
         "etag": "mockfacts01",
+        "measured_at": "2026-08-24T13:15:00Z",
+        "age_seconds": 120,
+        "job_state": "idle",
+        "timeout": False,
+        "last_attempt_at": "2026-08-24T13:15:00Z",
         "facts": facts,
         "sellable_tl": total,
-        "by_dc": [
-            {"dc_code": "DC13", "sellable_tl": 360.0, "fact_count": 1},
-            {"dc_code": "DC14", "sellable_tl": 5220.0, "fact_count": 1},
-        ],
+        "total_sellable_tl": total,
+        "unassigned_tl": 0.0,
+        "unassigned_share": 0.0,
+        "by_dc": by_dc,
         "by_service": [
-            {"service_group": "intel_hc", "sellable_tl": total, "fact_count": 2},
+            {
+                "service_group": "intel_hc",
+                "sellable_tl": total,
+                "unit_price_tl": 120.0,
+                "status": "normal",
+                "fact_count": sum(1 for f in facts if f["service_group"] == "intel_hc"),
+            },
         ],
         "by_region": [
-            {"region": "Türkiye", "sellable_tl": total, "fact_count": 2},
+            {
+                "region": "Türkiye",
+                "sellable_tl": total,
+                "fact_count": len(facts),
+                "dc_count": len({f["dc_code"] for f in facts}),
+                "share": 1.0,
+            },
         ],
         "summary": {
             "sellable_tl": total,
+            "total_sellable_tl": total,
             "sellable_tl_min": total,
             "sellable_tl_max": total,
-            "sold_tl": 2160.0,
-            "fact_count": 2,
+            "sold_tl": sum(float(f["sold_tl"] or 0) for f in facts),
+            "fact_count": len(facts),
+            "unassigned_tl": 0.0,
+            "unassigned_share": 0.0,
             "status": "ok",
         },
     }
@@ -669,14 +749,16 @@ def crm_facts_summary(scope: str = "*") -> dict[str, Any]:
     s = bundle["summary"]
     return {
         "scope": bundle["scope"],
-        "status": "ok",
+        "status": bundle["status"],
         "etag": bundle["etag"],
         "sellable_tl": s["sellable_tl"],
-        "total_sellable_tl": s["sellable_tl"],
+        "total_sellable_tl": s["total_sellable_tl"],
         "min": s["sellable_tl_min"],
         "max": s["sellable_tl_max"],
         "sold_tl": s["sold_tl"],
         "fact_count": s["fact_count"],
+        "unassigned_tl": s["unassigned_tl"],
+        "unassigned_share": s["unassigned_share"],
     }
 
 
