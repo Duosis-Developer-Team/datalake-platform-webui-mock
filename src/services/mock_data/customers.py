@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from copy import deepcopy
+from datetime import date, timedelta
 from typing import Any
 
 MOCK_CUSTOMER_NAMES: tuple[str, ...] = ("Akbank", "Pegasus Airlines", "Turk Telekom")
@@ -293,15 +295,69 @@ def _resources_turk_telekom() -> dict[str, Any]:
     )
 
 
+# DLP-014 (16.10) customer-api contract (SOZLESME, Datalake-Platform-GUI
+# feat/DLP-014-musteri-sicak-api): /customers/{name}/resources carries a
+# top-level ``freshness`` (fresh | stale | previous_window) or answers HTTP 202
+# {"status": "preparing", ...} while the bundle is computed in the background.
+# MOCK_CUSTOMER_FRESHNESS picks the state the mock answers with (default fresh).
+MOCK_FRESHNESS_ENV = "MOCK_CUSTOMER_FRESHNESS"
+MOCK_COMPUTED_AT = "2026-10-16T08:00:00+00:00"
+FRESHNESS_STATES = ("fresh", "stale", "previous_window", "preparing")
+
+
+def _mock_freshness_state() -> str:
+    raw = (os.getenv(MOCK_FRESHNESS_ENV) or "fresh").strip().lower()
+    return raw if raw in FRESHNESS_STATES else "fresh"
+
+
+def _mock_window(tr: dict | None) -> dict[str, str]:
+    tr = tr or {}
+    start, end = tr.get("start"), tr.get("end")
+    if start and end:
+        return {"start": str(start)[:10], "end": str(end)[:10]}
+    today = date.today()
+    return {"start": (today - timedelta(days=6)).isoformat(), "end": today.isoformat()}
+
+
+def customer_resources_freshness(tr: dict | None, state: str | None = None) -> dict[str, Any]:
+    state = state or _mock_freshness_state()
+    window = _mock_window(tr)
+    if state == "previous_window":
+        shift = timedelta(days=1)
+        window = {
+            "start": (date.fromisoformat(window["start"]) - shift).isoformat(),
+            "end": (date.fromisoformat(window["end"]) - shift).isoformat(),
+        }
+    return {"state": state, "computed_at": MOCK_COMPUTED_AT, "window": window}
+
+
+def customer_preparing_body(name: str, tr: dict | None) -> dict[str, Any]:
+    """The HTTP 202 body customer-api answers while a bundle is not computed."""
+    return {
+        "status": "preparing",
+        "customer": name,
+        "window": _mock_window(tr),
+        "eta_s": 145,
+        "queued_at": MOCK_COMPUTED_AT,
+        "position": 1,
+    }
+
+
 def get_customer_resources(name: str, _tr: dict | None = None) -> dict[str, Any]:
+    state = _mock_freshness_state()
+    if state == "preparing":
+        return customer_preparing_body(name, _tr)
     key = (name or "").strip().lower()
     if "akbank" in key:
-        return deepcopy(_resources_akbank())
-    if "pegasus" in key:
-        return deepcopy(_resources_pegasus())
-    if "turk" in key or "telekom" in key:
-        return deepcopy(_resources_turk_telekom())
-    return deepcopy(_resources_akbank())
+        bundle = deepcopy(_resources_akbank())
+    elif "pegasus" in key:
+        bundle = deepcopy(_resources_pegasus())
+    elif "turk" in key or "telekom" in key:
+        bundle = deepcopy(_resources_turk_telekom())
+    else:
+        bundle = deepcopy(_resources_akbank())
+    bundle["freshness"] = customer_resources_freshness(_tr, state)
+    return bundle
 
 
 def get_customer_s3_vaults(customer_name: str, _tr: dict | None = None) -> dict[str, Any]:
