@@ -28,3 +28,14 @@ def test_preparing_is_the_202_body_not_an_empty_bundle(monkeypatch):
     assert set(data) == {"status", "customer", "window", "eta_s", "queued_at", "position"}
     assert data["status"] == "preparing"
     assert "totals" not in data
+
+
+def test_failed_is_the_503_body_not_an_empty_bundle(monkeypatch):
+    """Faz 0 (19.10): MOCK_CUSTOMER_FRESHNESS=failed answers the failed body."""
+    monkeypatch.setenv(mc.MOCK_FRESHNESS_ENV, "failed")
+    data = mock_client.get_customer_resources("Akbank", TR)
+    assert set(data) == {"status", "reason", "customer", "window", "failed_at", "retry_after_s"}
+    assert data["status"] == "failed" and data["reason"] in ("timeout", "db_error", "other")
+    assert data["window"] == {"start": "2026-10-10", "end": "2026-10-16"}
+    assert data["retry_after_s"] > 0
+    assert "totals" not in data and "assets" not in data

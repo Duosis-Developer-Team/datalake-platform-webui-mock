@@ -299,10 +299,16 @@ def _resources_turk_telekom() -> dict[str, Any]:
 # feat/DLP-014-musteri-sicak-api): /customers/{name}/resources carries a
 # top-level ``freshness`` (fresh | stale | previous_window) or answers HTTP 202
 # {"status": "preparing", ...} while the bundle is computed in the background.
-# MOCK_CUSTOMER_FRESHNESS picks the state the mock answers with (default fresh).
+# MOCK_CUSTOMER_FRESHNESS picks the state the mock answers with (default fresh;
+# also "failed", Faz 0 19.10).
 MOCK_FRESHNESS_ENV = "MOCK_CUSTOMER_FRESHNESS"
 MOCK_COMPUTED_AT = "2026-10-16T08:00:00+00:00"
-FRESHNESS_STATES = ("fresh", "stale", "previous_window", "preparing")
+# Faz 0 (19.10): "failed" — customer-api answers HTTP 503 with the failed body
+# (+ Retry-After) when the window's background computation failed and is
+# cooling down (SOZLESME ek "Hesaplanamadı").
+MOCK_FAILED_AT = "2026-10-19T09:00:00+00:00"
+MOCK_FAILED_RETRY_AFTER_S = 1500
+FRESHNESS_STATES = ("fresh", "stale", "previous_window", "preparing", "failed")
 
 
 def _mock_freshness_state() -> str:
@@ -343,10 +349,25 @@ def customer_preparing_body(name: str, tr: dict | None) -> dict[str, Any]:
     }
 
 
+def customer_failed_body(name: str, tr: dict | None) -> dict[str, Any]:
+    """The HTTP 503 body customer-api answers while a failed window cools down.
+    No figures; ``reason`` is for clients, never shown to the customer."""
+    return {
+        "status": "failed",
+        "reason": "timeout",
+        "customer": name,
+        "window": _mock_window(tr),
+        "failed_at": MOCK_FAILED_AT,
+        "retry_after_s": MOCK_FAILED_RETRY_AFTER_S,
+    }
+
+
 def get_customer_resources(name: str, _tr: dict | None = None) -> dict[str, Any]:
     state = _mock_freshness_state()
     if state == "preparing":
         return customer_preparing_body(name, _tr)
+    if state == "failed":
+        return customer_failed_body(name, _tr)
     key = (name or "").strip().lower()
     if "akbank" in key:
         bundle = deepcopy(_resources_akbank())
