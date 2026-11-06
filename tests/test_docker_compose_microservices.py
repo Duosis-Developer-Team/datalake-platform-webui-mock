@@ -68,3 +68,13 @@ def test_docker_compose_db_service_not_on_microservice_profile() -> None:
     db_block = text.split("  db:")[1].split("  redis:")[0]
     assert "- microservice" not in db_block
     assert "- with-db" in db_block
+
+
+def test_docker_compose_mock_has_public_api_monitoring() -> None:
+    """DLP-020: the mock public API (/v1/monitoring/*) reads the hmdl-api mock, like the real one."""
+    text = _mock_compose_text()
+    block = text.split("  public-api:")[1].split("\nvolumes:")[0]
+    assert "dockerfile: services/public-api/Dockerfile" in block
+    assert '"8090:8000"' in block or "- 8090:8000" in block
+    assert "HMDL_API_URL: ${HMDL_API_URL:-http://hmdl-api:8000}" in block
+    assert "hmdl-api:" in block and "condition: service_healthy" in block
