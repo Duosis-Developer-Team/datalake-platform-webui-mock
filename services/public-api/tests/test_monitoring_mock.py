@@ -97,6 +97,59 @@ def test_parameters_pass_through():
         HMDL.get("/api/v1/dq/entities", params=p).json()
 
 
+def _same(public, internal, params):
+    a = client.get(f"/v1/monitoring/{public}", headers=MON, params=params)
+    assert a.status_code == 200, a.text
+    b = HMDL.get(f"/api/v1/{internal}", params=params)
+    assert b.status_code == 200, b.text
+    assert _strip(a.json()) == _strip(b.json())
+    return a.json()
+
+
+def test_hosts_device_type_and_role_pass_through():
+    full = HMDL.get("/api/v1/zabbix-sync/hosts", params={"page_size": 1000}).json()["total"]
+    by_type = _same("zabbix-sync/hosts", "zabbix-sync/hosts", {"device_type": "FortiGate-VM", "page_size": "1000"})
+    assert 0 < by_type["total"] < full
+    assert {h["device_type"] for h in by_type["hosts"]} == {"FortiGate-VM"}
+    by_role = _same("zabbix-sync/hosts", "zabbix-sync/hosts", {"device_role": "STORAGE", "page_size": "1000"})
+    assert 0 < by_role["total"] < full
+    assert {h["device_role"] for h in by_role["hosts"]} == {"STORAGE"}
+
+
+def test_dq_runs_limit_pass_through():
+    default = HMDL.get("/api/v1/dq/runs").json()["runs"]
+    body = _same("dq/runs", "dq/runs", {"limit": "3"})
+    assert len(body["runs"]) == 3 < len(default)
+
+
+def test_runs_since_pass_through():
+    runs = HMDL.get("/api/v1/zabbix-sync/runs").json()["runs"]
+    cut = runs[2]["last_row_at"]
+    body = _same("zabbix-sync/runs", "zabbix-sync/runs", {"since": cut})
+    assert body["runs"] and len(body["runs"]) < len(runs)
+    assert all(g["last_row_at"] >= cut for g in body["runs"])
+
+
+def test_route_answers_are_scrubbed():
+    """An upstream body with money / internal keys: the public answer drops them (upstream.scrub)."""
+    leaky = {"runs": [{"run_id": "dq-1", "complete": True, "last_error": "pg timeout", "unit_price_tl": 12.5,
+                       "nested": {"sql": "select 1", "kept": 1}}],
+             "filter_clause": "dc_code = 'DC13'", "cost": 3}
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        return httpx.Response(200, json=leaky)
+
+    leaky_client = TestClient(create_app(hmdl_api=Upstream("http://hmdl-api", client=httpx.Client(
+        base_url="http://hmdl-api", transport=httpx.MockTransport(handler)))))
+    for public in ("dq/runs", "zabbix-sync/summary", "automation/awx-revisions"):
+        r = leaky_client.get(f"/v1/monitoring/{public}", headers=MON)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"runs": [{"run_id": "dq-1", "complete": True, "nested": {"kept": 1}}]}, public
+    assert seen == ["/api/v1/dq/runs", "/api/v1/zabbix-sync/summary", "/api/v1/automation/awx-revisions"]
+
+
 def test_run_and_host_detail():
     run_id = HMDL.get("/api/v1/zabbix-sync/runs").json()["runs"][0]["run_id"]
     assert client.get(f"/v1/monitoring/zabbix-sync/runs/{run_id}", headers=MON).json() == \

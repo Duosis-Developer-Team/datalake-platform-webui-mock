@@ -156,9 +156,60 @@ def test_hosts_filters():
     assert upd and keys(status="GÜNCELLENEMEDİ") == upd  # normalize_status: Turkish capitals
     hpe = {h["host_key"] for h in everything if (h["manufacturer"] or "").casefold() == "hpe"}
     assert hpe and keys(manufacturer="hpe") == hpe
-    one = next(h for h in everything if h["ip"])
-    assert one["host_key"] in keys(q=one["ip"])
-    assert keys(q="DC16-PDU") == keys(q="dc16-pdu") != set()  # case-insensitive search
+
+
+def _hosts_all():
+    return get("zabbix-sync/hosts", page_size=1000)["hosts"]
+
+
+def _keys(**p):
+    return {h["host_key"] for h in get("zabbix-sync/hosts", page_size=1000, **p)["hosts"]}
+
+
+def _matching(hosts, needle):
+    """Hosts whose name, Zabbix host name or IP contains ``needle`` (plain ASCII casefold)."""
+    return {h["host_key"] for h in hosts
+            if needle in " ".join((h[k] or "").casefold() for k in ("name", "zabbix_hostname", "ip"))}
+
+
+def test_hosts_search_narrows_and_ignores_case():
+    everything = _hosts_all()
+    pdu = _matching(everything, "dc16-pdu")
+    assert pdu == {"device:name:dc16-pdu-a3"}
+    assert _keys(q="dc16-pdu") == pdu
+    assert _keys(q="DC16-PDU") == pdu  # case-insensitive
+    assert _keys(q="Dc16-PdU-A3") == pdu
+    assert _keys(q="10.134.90.84") == {"virtual_fw:884"}  # IP is searched too
+    prism = _matching(everything, "prism")
+    assert prism and len(prism) < len(everything)
+    assert _keys(q="PRISM") == prism
+    assert _keys(q="no-such-host-anywhere") == set()
+
+
+def test_hosts_device_type_and_role_filters():
+    everything = _hosts_all()
+    fgt = {h["host_key"] for h in everything if h["device_type"] == "FortiGate-VM"}
+    assert fgt and len(fgt) < len(everything)
+    assert _keys(device_type="FortiGate-VM") == fgt
+    assert _keys(device_type="fortigate-vm") == fgt  # case-insensitive, exact (not substring)
+    assert _keys(device_type="FortiGate") == set()
+    storage = {h["host_key"] for h in everything if h["device_role"] == "STORAGE"}
+    assert storage and len(storage) < len(everything)
+    assert _keys(device_role="storage") == storage
+    assert _keys(device_role="STORAGE", device_type="PowerStore 1000T") == storage
+    assert _keys(device_role="SWITCH", device_type="PowerStore 1000T") == set()
+
+
+@pytest.mark.parametrize("dotted, dotless", [("İ", "ı")])
+def test_fold_turkish_i_variants(dotted, dotless):
+    """``_fold``: İ, I and ı all fold to i (str.casefold alone turns İ into i + U+0307)."""
+    everything = _hosts_all()
+    fgt = {h["host_key"] for h in everything if h["device_type"] == "FortiGate-VM"}
+    prism = _matching(everything, "prism")
+    assert _keys(device_type=f"FORT{dotted}GATE-VM") == fgt
+    assert _keys(device_type=f"fort{dotless}gate-vm") == fgt
+    assert _keys(q=f"PR{dotted}SM") == prism
+    assert _keys(q=f"pr{dotless}sm") == prism
 
 
 def test_hosts_paging():
@@ -203,6 +254,32 @@ def test_snapshot_states(monkeypatch, state, code, body):
     for path in ("zabbix-sync/summary", "zabbix-sync/hosts", "zabbix-sync/hosts/device:15231"):
         r = client.get(f"{API}/{path}")
         assert (r.status_code, r.json()) == (code, body), path
+
+
+def test_snapshot_stale_mode(monkeypatch):
+    """``stale``: still 200 with data, but the snapshot is older than two refresh rounds."""
+    from app import monitoring_data as md
+
+    monkeypatch.setenv("HMDL_MOCK_SNAPSHOT_STATE", "stale")
+    now = datetime.now(timezone.utc)
+    for path in ("zabbix-sync/summary", "zabbix-sync/hosts", "zabbix-sync/hosts/device:15231"):
+        snap = get(path)["snapshot"]
+        assert snap["status"] == "ok" and snap["stale"] is True, path
+        assert now - _ts(snap["generated_at"]) > timedelta(minutes=2 * md.SYNC_SNAPSHOT_MIN), path
+    assert get("zabbix-sync/hosts")["hosts"]
+    monkeypatch.setenv("HMDL_MOCK_SNAPSHOT_STATE", "")
+    assert get("zabbix-sync/summary")["snapshot"]["stale"] is False
+
+
+@pytest.mark.parametrize("state, code, body", [
+    ("preparing", 202, {"status": "preparing", "retry_after_s": 120}),
+    ("unavailable", 503, {"detail": "datalake unavailable"}),
+])
+def test_dq_entities_states(monkeypatch, state, code, body):
+    """GUI monitoring_state.dq_entities: no state yet → 202 (retry 120 s), refresh failed → 503."""
+    monkeypatch.setenv("HMDL_MOCK_SNAPSHOT_STATE", state)
+    r = client.get(f"{API}/dq/entities")
+    assert (r.status_code, r.json()) == (code, body)
 
 
 # ── DQ ──────────────────────────────────────────────────────────────────────
@@ -281,6 +358,25 @@ def test_awx_revisions():
         assert (j["on_main"] is None) == (j["reason"] is not None and "main dışı" not in j["reason"])
     assert body["off_main"] == sum(1 for j in body["jobs"] if j["on_main"] is False) >= 1
     assert body["unknown"] == sum(1 for j in body["jobs"] if j["on_main"] is None) >= 1
+    on_main = {j["job_template"] for j in body["jobs"] if j["on_main"] is True}
+    assert on_main == {26, 52}  # GitHub says "behind" for their revision: the code is on main
+    assert all(j["reason"] is None for j in body["jobs"] if j["on_main"] is True)
+
+
+@pytest.mark.parametrize("answer, on_main, reason", [
+    ("identical", True, None),
+    ("behind", True, None),
+    ("ahead", False, "main dışı kod (github: ahead)"),
+    ("diverged", False, "main dışı kod (github: diverged)"),
+    (None, None, "github karşılaştırması yapılamadı"),
+])
+def test_revision_report_compare_answers(answer, on_main, reason):
+    from app import monitoring_data as md
+
+    job = {"job_template": 1, "scm_revision": "abc"}
+    assert md._revision_report([job], lambda rev: answer) == [{**job, "on_main": on_main, "reason": reason}]
+    assert md._revision_report([{"job_template": 2, "scm_revision": " "}], lambda rev: "identical") == \
+        [{"job_template": 2, "scm_revision": " ", "on_main": None, "reason": "revizyon yok"}]
 
 
 def test_awx_revisions_not_configured(monkeypatch):
