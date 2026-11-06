@@ -69,5 +69,22 @@ services:
       timeout: 5s
       retries: 5
 
+  public-api:
+    # DLP-020: mock public API, /v1/monitoring/* only (monitoring:read), read from the hmdl-api mock.
+    # Demo keys (services/public-api/public_api/mock_keys.py), mock only:
+    #   monitoring:read   dlp_0000a001_mock-monitoring-read-demo-key-not-a-secret-
+    #   datacenters:read  dlp_0000a002_mock-datacenters-read-demo-key-not-a-secret  (403 on monitoring)
+    build:
+      context: .
+      dockerfile: services/public-api/Dockerfile
+    container_name: datalake-webui-mock-public-api
+    ports:
+      - "8090:8000"
+    environment:
+      HMDL_API_URL: ${HMDL_API_URL:-http://hmdl-api:8000}
+    depends_on:
+      hmdl-api:
+        condition: service_healthy
+
 volumes:
   mock_auth_pgdata:

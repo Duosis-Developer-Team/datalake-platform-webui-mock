@@ -1,0 +1,2335 @@
+{
+ "paths": {
+  "/v1/monitoring/automation/awx-revisions": {
+   "get": {
+    "operationId": "mon_awx_revisions_v1_monitoring_automation_awx_revisions_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "Live AWX jobs: is each one running the code on main",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/automation/status": {
+   "get": {
+    "operationId": "mon_automation_v1_monitoring_automation_status_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "HMDL automations: last run, state (fresh / stale / dead / unknown) and since when",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/dq/entities": {
+   "get": {
+    "operationId": "mon_dq_entities_v1_monitoring_dq_entities_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "kok_neden",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Kok Neden"
+      }
+     },
+     {
+      "in": "query",
+      "name": "entity_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Entity Type"
+      }
+     },
+     {
+      "in": "query",
+      "name": "family",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Family"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dc",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Dc"
+      }
+     },
+     {
+      "in": "query",
+      "name": "problems_only",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Problems Only"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_leaf",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Include Leaf"
+      }
+     },
+     {
+      "in": "query",
+      "name": "page",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Page"
+      }
+     },
+     {
+      "in": "query",
+      "name": "page_size",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maximum": 2000,
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Page Size"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "Data quality: current state of each entity and since when (vm / ibm_lpar only on request)",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/dq/runs": {
+   "get": {
+    "operationId": "mon_dq_runs_v1_monitoring_dq_runs_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maximum": 200,
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "Data quality runs and whether each was complete",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/zabbix-sync/hosts": {
+   "get": {
+    "operationId": "mon_sync_hosts_v1_monitoring_zabbix_sync_hosts_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "status",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "in": "query",
+      "name": "entity_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Entity Type"
+      }
+     },
+     {
+      "in": "query",
+      "name": "device_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Device Type"
+      }
+     },
+     {
+      "in": "query",
+      "name": "device_role",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Device Role"
+      }
+     },
+     {
+      "in": "query",
+      "name": "manufacturer",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Manufacturer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dc",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Dc"
+      }
+     },
+     {
+      "in": "query",
+      "name": "reason_code",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Reason Code"
+      }
+     },
+     {
+      "description": "only eklenemedi / güncellenemedi",
+      "in": "query",
+      "name": "problems_only",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "only eklenemedi / güncellenemedi",
+       "title": "Problems Only"
+      }
+     },
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Q"
+      }
+     },
+     {
+      "in": "query",
+      "name": "page",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Page"
+      }
+     },
+     {
+      "in": "query",
+      "name": "page_size",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maximum": 1000,
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Page Size"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "Current state of every host: status, reason code, status_since (since when), device type",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/zabbix-sync/hosts/{host_key}": {
+   "get": {
+    "operationId": "mon_sync_host_v1_monitoring_zabbix_sync_hosts__host_key__get",
+    "parameters": [
+     {
+      "description": "host_key, e.g. virtual_fw:884",
+      "in": "path",
+      "name": "host_key",
+      "required": true,
+      "schema": {
+       "description": "host_key, e.g. virtual_fw:884",
+       "title": "Host Key",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maximum": 500,
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "One host's current state and its history over the last runs",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/zabbix-sync/runs": {
+   "get": {
+    "operationId": "mon_sync_runs_v1_monitoring_zabbix_sync_runs_get",
+    "parameters": [
+     {
+      "description": "device, platform, virtual_fw",
+      "in": "query",
+      "name": "entity_type",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "device, platform, virtual_fw",
+       "title": "Entity Type"
+      }
+     },
+     {
+      "description": "ISO 8601",
+      "in": "query",
+      "name": "since",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "ISO 8601",
+       "title": "Since"
+      }
+     },
+     {
+      "description": "running or finished",
+      "in": "query",
+      "name": "state",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "running or finished",
+       "title": "State"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_dry_run",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Include Dry Run"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maximum": 200,
+         "minimum": 1,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Limit"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "Loki→Zabbix sync runs with the mail's counts",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/zabbix-sync/runs/{run_id}": {
+   "get": {
+    "operationId": "mon_sync_run_v1_monitoring_zabbix_sync_runs__run_id__get",
+    "parameters": [
+     {
+      "description": "run_id from /monitoring/zabbix-sync/runs",
+      "in": "path",
+      "name": "run_id",
+      "required": true,
+      "schema": {
+       "description": "run_id from /monitoring/zabbix-sync/runs",
+       "title": "Run Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "One sync run: summary and the mail's sections (failed, update failed, skipped, added, updated)",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  },
+  "/v1/monitoring/zabbix-sync/summary": {
+   "get": {
+    "operationId": "mon_sync_summary_v1_monitoring_zabbix_sync_summary_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Missing or invalid API key"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Scope missing"
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Not found"
+     },
+     "429": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Rate limited"
+     },
+     "502": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "error": {
+           "properties": {
+            "code": {
+             "enum": [
+              "unauthorized",
+              "forbidden",
+              "not_found",
+              "bad_request",
+              "rate_limited",
+              "upstream_error",
+              "unavailable"
+             ],
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "request_id": {
+             "type": "string"
+            }
+           },
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "Data service error"
+     }
+    },
+    "summary": "Loki→Zabbix sync: last run per entity type and host counts by status",
+    "tags": [
+     "monitoring"
+    ]
+   }
+  }
+ },
+ "schemas": {
+  "HTTPValidationError": {
+   "properties": {
+    "detail": {
+     "items": {
+      "$ref": "#/components/schemas/ValidationError"
+     },
+     "title": "Detail",
+     "type": "array"
+    }
+   },
+   "title": "HTTPValidationError",
+   "type": "object"
+  },
+  "ValidationError": {
+   "properties": {
+    "ctx": {
+     "title": "Context",
+     "type": "object"
+    },
+    "input": {
+     "title": "Input"
+    },
+    "loc": {
+     "items": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "integer"
+       }
+      ]
+     },
+     "title": "Location",
+     "type": "array"
+    },
+    "msg": {
+     "title": "Message",
+     "type": "string"
+    },
+    "type": {
+     "title": "Error Type",
+     "type": "string"
+    }
+   },
+   "required": [
+    "loc",
+    "msg",
+    "type"
+   ],
+   "title": "ValidationError",
+   "type": "object"
+  }
+ }
+}
