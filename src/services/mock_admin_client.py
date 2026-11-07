@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.auth.role_errors import RoleNameTaken
+
 # Mutable in-memory state (module-level)
 _users: list[dict[str, Any]] = [
     {
@@ -433,6 +435,100 @@ def remove_team_member(team_id: int, user_id: int) -> None:
     for u in _users:
         if u["id"] == user_id and team_id in u["team_ids"]:
             u["team_ids"] = [t for t in u["team_ids"] if t != team_id]
+
+
+ROLE_NAME_MAX = 100  # same limit as the GUI (roles.name VARCHAR(100))
+
+
+def _normalize_role_name(raw: str | None) -> str:
+    """Trim; 1-100 characters after trimming, otherwise ``ValueError`` (admin-api: 422)."""
+    name = (raw or "").strip()
+    if not name:
+        raise ValueError("Name is required")
+    if len(name) > ROLE_NAME_MAX:
+        raise ValueError(f"Name is longer than {ROLE_NAME_MAX} characters")
+    return name
+
+
+def create_role(
+    name: str,
+    description: str | None = None,
+    copy_from_role_id: int | None = None,
+) -> dict[str, Any]:
+    """Create a non-system role, optionally copying another role's matrix (DLP-023 K5/K16).
+
+    Mirrors the GUI ``admin_client.create_role``: returns ``{"id", "name", "copied_rows"}``.
+    Name taken (case-insensitive, after trim) -> ``RoleNameTaken``; invalid name -> ``ValueError``;
+    copy source missing -> ``LookupError``. Checks run in that order and nothing is changed
+    (no id consumed) when one fails.
+    """
+    global _next_rid
+    clean = _normalize_role_name(name)
+    if any(str(r["name"]).strip().lower() == clean.lower() for r in _roles):
+        raise RoleNameTaken("Role name already exists")
+    if copy_from_role_id is not None and not any(r["id"] == copy_from_role_id for r in _roles):
+        raise LookupError("Source role not found")
+    rid = _next_rid
+    _next_rid += 1
+    _roles.append({"id": rid, "name": clean, "description": description, "is_system": False})
+    copied = 0
+    if copy_from_role_id is not None:
+        for (src_rid, pid), flags in list(_role_permissions.items()):
+            if src_rid == copy_from_role_id:
+                _role_permissions[(rid, pid)] = dict(flags)
+                copied += 1
+    return {"id": rid, "name": clean, "copied_rows": copied}
+
+
+def _role_usage_counts_for(role_id: int) -> dict[str, int]:
+    users = sum(1 for u in _users if role_id in [int(x) for x in u.get("role_ids") or []])
+    team_ids = {int(t["id"]) for t in _teams if role_id in [int(x) for x in t.get("role_ids") or []]}
+    # R9: users who hold the role ONLY through a team (a direct holder is not counted).
+    direct = {int(u["id"]) for u in _users if role_id in [int(x) for x in u.get("role_ids") or []]}
+    team_only = {uid for (tid, uid) in _team_members if tid in team_ids and uid not in direct}
+    return {"users": users, "teams": len(team_ids), "team_members": len(team_only), "ldap_mappings": 0}
+
+
+def role_usage(role_id: int) -> dict[str, Any]:
+    """Who holds the role; same shape as admin-api ``RoleUsageOut``. Missing role -> ``LookupError``.
+
+    The mock has no LDAP group mappings, so ``ldap_mappings`` is always ``[]`` (count 0).
+    """
+    role = next((r for r in _roles if r["id"] == role_id), None)
+    if role is None:
+        raise LookupError("Role not found")
+    users = sorted(
+        (
+            {"id": u["id"], "username": u["username"], "display_name": u.get("display_name")}
+            for u in _users
+            if role_id in [int(x) for x in u.get("role_ids") or []]
+        ),
+        key=lambda u: (u["username"], u["id"]),
+    )
+    teams = sorted(
+        (
+            {
+                "id": t["id"],
+                "name": t["name"],
+                "member_count": sum(1 for (tid, _uid) in _team_members if tid == t["id"]),
+            }
+            for t in _teams
+            if role_id in [int(x) for x in t.get("role_ids") or []]
+        ),
+        key=lambda t: (t["name"], t["id"]),
+    )
+    return {
+        "role": {"id": role["id"], "name": role["name"], "is_system": bool(role.get("is_system"))},
+        "users": users,
+        "teams": teams,
+        "ldap_mappings": [],
+        "counts": _role_usage_counts_for(role_id),
+    }
+
+
+def role_usage_counts() -> dict[int, dict[str, int]]:
+    """Usage counts of every role keyed by int role id; zero-usage roles included (ruling T16-1)."""
+    return {int(r["id"]): _role_usage_counts_for(int(r["id"])) for r in _roles}
 
 
 def update_role(role_id: int, name: str | None, description: str | None) -> None:

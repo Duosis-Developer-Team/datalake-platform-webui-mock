@@ -7,6 +7,7 @@ from typing import Any
 from src.auth import db
 from src.auth.crypto import hash_password
 from src.auth.permission_service import clear_user_cache
+from src.auth.role_errors import RoleNameTaken
 
 
 def list_users_with_roles() -> list[dict[str, Any]]:
@@ -395,6 +396,174 @@ def set_user_teams_local(user_id: int, team_ids: list[int]) -> None:
             (tid, user_id),
         )
     clear_user_cache(user_id)
+
+
+ROLE_NAME_MAX = 100  # roles.name VARCHAR(100)
+
+# R9: users who hold the role ONLY through a team (a direct holder is not counted).
+_TEAM_ONLY_MEMBERS_SQL = """
+    SELECT count(DISTINCT tm.user_id)
+    FROM team_roles tr
+    JOIN team_members tm ON tm.team_id = tr.team_id
+    WHERE tr.role_id = {role}
+      AND NOT EXISTS (
+          SELECT 1 FROM user_roles ur
+          WHERE ur.user_id = tm.user_id AND ur.role_id = tr.role_id
+      )
+"""
+
+
+def _normalize_role_name(raw: str | None) -> str:
+    """Trim; 1-100 characters after trimming, otherwise ``ValueError`` (admin-api: 422)."""
+    name = (raw or "").strip()
+    if not name:
+        raise ValueError("Name is required")
+    if len(name) > ROLE_NAME_MAX:
+        raise ValueError(f"Name is longer than {ROLE_NAME_MAX} characters")
+    return name
+
+
+def _role_name_taken(cur, name: str, exclude_id: int | None) -> bool:
+    """Case-insensitive uniqueness checked in the application (no lower(name) index)."""
+    if exclude_id is None:
+        cur.execute("SELECT 1 FROM roles WHERE lower(name) = lower(%s) LIMIT 1", (name,))
+    else:
+        cur.execute(
+            "SELECT 1 FROM roles WHERE lower(name) = lower(%s) AND id <> %s LIMIT 1",
+            (name, exclude_id),
+        )
+    return cur.fetchone() is not None
+
+
+def create_role(name: str, description: str | None, copy_from_role_id: int | None) -> dict[str, Any]:
+    """Create a non-system role; optionally copy another role's matrix in the same transaction.
+
+    Returns ``{"id", "name", "copied_rows"}``. ``RoleNameTaken`` / ``ValueError`` / ``LookupError``
+    as admin-api's 409 / 422 / 404.
+    """
+    from psycopg2.errors import UniqueViolation
+    from psycopg2.extras import RealDictCursor
+
+    clean = _normalize_role_name(name)
+    try:
+        with db.connection() as conn:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                if _role_name_taken(cur, clean, None):
+                    raise RoleNameTaken("Role name already exists")
+                if copy_from_role_id is not None:
+                    cur.execute("SELECT 1 FROM roles WHERE id = %s", (copy_from_role_id,))
+                    if cur.fetchone() is None:
+                        raise LookupError("Source role not found")
+                cur.execute(
+                    "INSERT INTO roles (name, description, is_system) VALUES (%s, %s, FALSE) RETURNING id",
+                    (clean, description),
+                )
+                new_id = int(cur.fetchone()["id"])
+                copied = 0
+                if copy_from_role_id is not None:
+                    cur.execute(
+                        """
+                        INSERT INTO role_permissions (role_id, permission_id, can_view, can_edit, can_export)
+                        SELECT %s, permission_id, can_view, can_edit, can_export
+                        FROM role_permissions
+                        WHERE role_id = %s
+                        """,
+                        (new_id, copy_from_role_id),
+                    )
+                    copied = int(cur.rowcount)
+            finally:
+                cur.close()
+    except UniqueViolation as exc:
+        raise RoleNameTaken("Role name already exists") from exc
+    return {"id": new_id, "name": clean, "copied_rows": copied}
+
+
+def role_usage(role_id: int) -> dict[str, Any]:
+    """Who holds the role; same shape as admin-api ``RoleUsageOut``. Missing role → ``LookupError``."""
+    from psycopg2.extras import RealDictCursor
+
+    with db.connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            cur.execute("SELECT id, name, is_system FROM roles WHERE id = %s", (role_id,))
+            role = cur.fetchone()
+            if not role:
+                raise LookupError("Role not found")
+            cur.execute(
+                """
+                SELECT u.id, u.username, u.display_name
+                FROM user_roles ur JOIN users u ON u.id = ur.user_id
+                WHERE ur.role_id = %s
+                ORDER BY u.username, u.id
+                """,
+                (role_id,),
+            )
+            users = [dict(u) for u in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT t.id, t.name,
+                       (SELECT count(*) FROM team_members tm WHERE tm.team_id = t.id) AS member_count
+                FROM team_roles tr JOIN teams t ON t.id = tr.team_id
+                WHERE tr.role_id = %s
+                ORDER BY t.name, t.id
+                """,
+                (role_id,),
+            )
+            teams = [
+                {"id": int(t["id"]), "name": t["name"], "member_count": int(t["member_count"])}
+                for t in cur.fetchall()
+            ]
+            cur.execute(
+                """
+                SELECT id, ldap_config_id, ldap_group_dn
+                FROM ldap_group_role_mapping
+                WHERE role_id = %s
+                ORDER BY id
+                """,
+                (role_id,),
+            )
+            mappings = [dict(m) for m in cur.fetchall()]
+            cur.execute(f"SELECT ({_TEAM_ONLY_MEMBERS_SQL.format(role='%s')}) AS n", (role_id,))
+            team_members = int(cur.fetchone()["n"])
+        finally:
+            cur.close()
+    return {
+        "role": {"id": int(role["id"]), "name": role["name"], "is_system": bool(role["is_system"])},
+        "users": users,
+        "teams": teams,
+        "ldap_mappings": mappings,
+        "counts": {
+            "users": len(users),
+            "teams": len(teams),
+            "team_members": team_members,
+            "ldap_mappings": len(mappings),
+        },
+    }
+
+
+def role_usage_counts() -> dict[int, dict[str, int]]:
+    """Usage counts of every role in one query, int keys (ruling T16-1); zero-usage roles included."""
+    rows = db.fetch_all(
+        f"""
+        SELECT r.id AS role_id,
+               (SELECT count(*) FROM user_roles ur WHERE ur.role_id = r.id) AS users,
+               (SELECT count(*) FROM team_roles tr WHERE tr.role_id = r.id) AS teams,
+               ({_TEAM_ONLY_MEMBERS_SQL.format(role="r.id")}) AS team_members,
+               (SELECT count(*) FROM ldap_group_role_mapping m WHERE m.role_id = r.id) AS ldap_mappings
+        FROM roles r
+        ORDER BY r.id
+        """
+    )
+    return {
+        int(r["role_id"]): {
+            "users": int(r["users"]),
+            "teams": int(r["teams"]),
+            "team_members": int(r["team_members"]),
+            "ldap_mappings": int(r["ldap_mappings"]),
+        }
+        for r in rows
+    }
 
 
 def update_role_meta(role_id: int, name: str | None, description: str | None) -> None:
