@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from urllib.parse import quote
 
-from flask import Blueprint, redirect, request, session, url_for
+from flask import Blueprint, redirect, request, session
 
 from src.auth import service
 from src.auth.config import SESSION_COOKIE_NAME
@@ -72,64 +72,6 @@ def _perm_edit(uid: int, code: str) -> bool:
     from src.auth.permission_service import can_edit
 
     return can_edit(uid, code)
-
-
-@auth_bp.route("/settings/create-user", methods=["POST"])
-def settings_create_user():
-    from urllib.parse import quote
-
-    uid = _session_uid()
-    if uid is None:
-        return redirect("/login")
-    if not _perm_edit(uid, "page:settings_users"):
-        return redirect("/settings/iam/users?denied=1")
-    username = (request.form.get("username") or "").strip()
-    password = request.form.get("password") or ""
-    display_name = (request.form.get("display_name") or "").strip()
-    role_ids_raw = request.form.get("role_ids") or ""
-    if not username or not password:
-        return redirect("/settings/iam/users?err=1")
-    from src.services import admin_client as settings_crud
-
-    try:
-        new_id = settings_crud.create_local_user(username, password, display_name or None)
-        rids = []
-        for part in role_ids_raw.replace(" ", "").split(","):
-            if part.isdigit():
-                rids.append(int(part))
-        if new_id and rids:
-            settings_crud.set_user_roles(new_id, rids)
-        service.audit(uid, "settings_create_user", username, request.remote_addr)
-    except Exception as e:
-        logger.warning("create user failed: %s", e)
-        return redirect("/settings/iam/users?err=1")
-    return redirect("/settings/iam/users")
-
-
-@auth_bp.route("/settings/role-matrix", methods=["POST"])
-def settings_role_matrix():
-    uid = _session_uid()
-    if uid is None:
-        return redirect("/login")
-    if not _perm_edit(uid, "page:settings_roles"):
-        return redirect("/settings/iam/roles?denied=1")
-    rid_s = request.form.get("role_id") or ""
-    if not rid_s.isdigit():
-        return redirect("/settings/iam/roles")
-    role_id = int(rid_s)
-    from src.services import admin_client as settings_crud
-
-    perms = settings_crud.list_permissions_flat()[:100]
-    triplets = []
-    for p in perms:
-        pid = int(p["id"])
-        v = f"v_{pid}" in request.form
-        e = f"e_{pid}" in request.form
-        x = f"x_{pid}" in request.form
-        triplets.append((pid, v, e, x))
-    settings_crud.bulk_set_role_matrix(role_id, triplets)
-    service.audit(uid, "settings_role_matrix", f"role_id={role_id}", request.remote_addr)
-    return redirect(f"/settings/iam/roles?role_id={role_id}")
 
 
 @auth_bp.route("/settings/permission-add", methods=["POST"])
@@ -233,21 +175,4 @@ def settings_ldap_mapping_delete():
 
     settings_crud.delete_ldap_group_mapping(int(mid))
     return redirect("/settings/integrations/ldap")
-
-
-@auth_bp.route("/settings/team-create", methods=["POST"])
-def settings_team_create():
-    uid = _session_uid()
-    if uid is None:
-        return redirect("/login")
-    if not _perm_edit(uid, "page:settings_teams"):
-        return redirect("/settings/iam/teams?denied=1")
-    name = (request.form.get("name") or "").strip()
-    if not name:
-        return redirect("/settings/iam/teams?err=1")
-    from src.services import admin_client as settings_crud
-
-    settings_crud.create_team(name, None, uid)
-    service.audit(uid, "settings_team_create", name, request.remote_addr)
-    return redirect("/settings/iam/teams")
 
