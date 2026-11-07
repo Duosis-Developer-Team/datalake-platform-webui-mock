@@ -12,10 +12,33 @@ import logging
 import os
 from typing import Any
 
+from src.auth.role_errors import RoleNameTaken
+
 logger = logging.getLogger(__name__)
 
 _ADMIN_API_URL = (os.environ.get("ADMIN_API_URL") or "").rstrip("/")
 _USE_API = bool(_ADMIN_API_URL)
+
+
+def _detail_text(resp: Any) -> str:
+    """admin-api error detail as text: router ``str`` detail or pydantic's list of errors."""
+    try:
+        detail = resp.json().get("detail")
+    except Exception:
+        return resp.text or str(resp.status_code)
+    if isinstance(detail, list):
+        return "; ".join(str(d.get("msg", d)) if isinstance(d, dict) else str(d) for d in detail)
+    return str(detail) if detail is not None else str(resp.status_code)
+
+
+def _raise_mapped(exc: Exception, mapping: dict[int, type[Exception]]) -> None:
+    """Re-raise an ``httpx.HTTPStatusError`` whose status is in ``mapping`` as the mapped type."""
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        kind = mapping.get(exc.response.status_code)
+        if kind is not None:
+            raise kind(_detail_text(exc.response)) from exc
 
 
 def _get(path: str, params: dict | None = None, timeout: float = 10) -> Any:
@@ -387,6 +410,47 @@ def set_user_teams(user_id: int, team_ids: list[int]) -> None:
         from src.auth import settings_crud
         return settings_crud.set_user_teams_local(user_id, team_ids)
     _put(f"/api/v1/users/{user_id}/teams", {"team_ids": team_ids})
+
+
+def create_role(name: str, description: str | None, copy_from_role_id: int | None) -> dict[str, Any]:
+    """Create a non-system role, optionally copying another role's matrix (DLP-023 K5/K16).
+
+    Returns ``{"id", "name", "copied_rows"}``. Name taken (case-insensitive) -> ``RoleNameTaken``;
+    invalid name -> ``ValueError``; copy source missing -> ``LookupError``. Same on both paths.
+    """
+    if not _USE_API:
+        from src.auth import settings_crud
+        return settings_crud.create_role(name, description, copy_from_role_id)
+    try:
+        return _post("/api/v1/roles", {
+            "name": name,
+            "description": description,
+            "copy_from_role_id": copy_from_role_id,
+        })
+    except Exception as exc:
+        _raise_mapped(exc, {409: RoleNameTaken, 422: ValueError, 404: LookupError})
+        raise
+
+
+def role_usage(role_id: int) -> dict[str, Any]:
+    """``{"role", "users", "teams", "ldap_mappings", "counts"}``; missing role -> ``LookupError``."""
+    if not _USE_API:
+        from src.auth import settings_crud
+        return settings_crud.role_usage(role_id)
+    try:
+        return _get(f"/api/v1/roles/{role_id}/usage")
+    except Exception as exc:
+        _raise_mapped(exc, {404: LookupError})
+        raise
+
+
+def role_usage_counts() -> dict[int, dict[str, int]]:
+    """Usage counts of every role keyed by int role id (roles table; ruling T16-1)."""
+    if not _USE_API:
+        from src.auth import settings_crud
+        return settings_crud.role_usage_counts()
+    data = _get("/api/v1/roles/usage-counts") or {}
+    return {int(k): v for k, v in data.items()}
 
 
 def update_role(role_id: int, name: str | None, description: str | None) -> None:
